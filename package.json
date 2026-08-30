@@ -1,0 +1,11 @@
+{
+  "name": "4zida-serbia-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "n8n workflow: 4zida.rs listings above 100k EUR across Serbia -> Google Sheets",
+  "scripts": {
+    "build": "python3 build/build.py",
+    "test": "node tests/parse.test.js && node tests/validate.js && node tests/simulate.js && node tests/simulate_probe.js",
+    "verify": "npm run build && npm test"
+  }
+}
