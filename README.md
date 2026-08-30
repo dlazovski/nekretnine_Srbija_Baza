@@ -47,7 +47,7 @@ in the run's execution data). Prices additionally come from two *independent*
 sources, and a disagreement between them is reported rather than resolved
 silently.
 
-Verified by 187 assertions, including regression tests reproducing both live
+Verified by 197 assertions, including regression tests reproducing both live
 bugs from the payload shapes the probe reported. See
 [Development](#development).
 
@@ -224,6 +224,14 @@ Two fields worth checking after every run:
 * `errors_no_advertiser_name` — the page is the right listing but carries no
   advertiser name. Logged rather than written, since the name is one of the four
   required fields.
+* `errors_thin_shell_pages` — pages that came back without their server-rendered
+  content (~130 KB instead of ~1 MB). **This is the one to take seriously.**
+  Open one of those links in a browser: if the ad loads normally, the site is
+  soft-blocking and the data is recoverable — set `premium_proxy: true`, raise
+  `delay_seconds`, or switch `Fetch Detail Page` to `render_js=true`. If the
+  browser also shows the ad is gone, they are simply removed ads and skipping is
+  correct. A sustained rate (≥40% after 20 listings) stops the run rather than
+  spending thousands of credits on shells.
 
 ## If requests fail
 
@@ -259,7 +267,7 @@ tests/               unit tests, structural validation, workflow simulation
 
 ```bash
 python3 build/build.py   # regenerate both workflow JSON files
-npm test                 # 187 assertions across 4 suites
+npm test                 # 197 assertions across 4 suites
 ```
 
 `tests/simulate.js` is the important one: it pulls the JavaScript **out of the

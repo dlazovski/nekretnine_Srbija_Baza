@@ -30,6 +30,11 @@ return [{ json: {
   errors_logged: errors,
   errors_wrong_page_ad_removed: s.detail_wrong_page || 0,
   errors_no_advertiser_name: s.detail_no_advertiser || 0,
+  errors_thin_shell_pages: s.detail_thin_shell || 0,
+  thin_shell_page_bytes: s.thin_shell_bytes || [],
+  THIN_SHELL_MEANING: (s.detail_thin_shell || 0) > 0
+    ? 'Pages returned without server-rendered content (~1MB expected). If those urls load fine in a browser this is a SOFT BLOCK and the data is recoverable: premium_proxy=true, longer delay_seconds, or render_js=true. If the browser also shows the ad is gone, they are simply removed ads.'
+    : '',
   error_rate_pct: queued ? Math.round(100 * errors / queued) : 0,
   error_samples: s.error_samples || [],
   rows_with_a_blank_field: s.detail_blank_fields || 0,

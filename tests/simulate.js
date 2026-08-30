@@ -112,7 +112,7 @@ function runWorkflow(cfgOverrides, pageFor, detailKindFor, customDetailHtml) {
           : kind === 'removed'
             ? httpItem(CHROME + BULK + '<body><h1>Pretraga</h1><div>250.000 €</div><script>{"id":"' + id(7200) +
                 '","fullName":"Neko Drugi","phones":[{"full":"+381641234567"}]}</script></body></html>', 200)
-            : kind === 'noname'
+            : (kind === 'noname' || kind === 'thin')
               ? httpItem(customDetailHtml, 200)
               : httpItem(detailPage(lid, kind), 200);
       const ex = runNode('Extract 4 Fields', resp, out, store)[0];
@@ -251,6 +251,38 @@ eq('error rows still balance', r2.summary.unaccounted, 0);
     () => 'noname', noName);
   eq('missing advertiser name is logged, not written', [rs.summary.written_to_sheet, rs.summary.errors_logged], [0, 1]);
   eq('counted as a missing name', rs.summary.errors_no_advertiser_name, 1);
+}
+
+/* --- a thin page (no SSR content) must be distinguished from a removed ad:
+ * one is lost real data, the other is nothing to recover --- */
+{
+  const shell = '<html lang="sr"><head><title>4zida.rs</title></head><body><div id="__next"></div>' +
+    '<script src="/_next/static/chunk.js"></script>' + 'z'.repeat(2000) + '</body></html>';
+  const rs = runWorkflow({ max_pages: 1 },
+    (url) => ({ body: /strana=/.test(url) ? CHROME + BULK + '<body><main></main></body></html>'
+      : CHROME + BULK + '<body><main><article><a href="/prodaja-stanova/nis/dvoiposoban-stan/' + id(7500) +
+        '">x</a><p>250.000 €</p></article></main></body></html>', status: 200 }),
+    () => 'thin', shell);
+  eq('thin shell is classified separately from a removed ad', rs.summary.errors_thin_shell_pages, 1);
+  ok('the error names the classification', /thin_shell/.test(rs.errors[0].error_message), rs.errors[0].error_message);
+  ok('the error carries the discriminating signals',
+     /bytes=\d+ jsonld=false payload=false/.test(rs.errors[0].error_message), rs.errors[0].error_message);
+  ok('summary explains what a thin shell means', /SOFT BLOCK/.test(rs.summary.THIN_SHELL_MEANING), rs.summary.THIN_SHELL_MEANING);
+  ok('one thin page does not trip the soft-block guard', rs.summary.written_to_sheet + rs.summary.errors_logged === 1);
+}
+
+/* --- sustained thin pages ARE a soft block and must stop the run --- */
+{
+  const shell = '<html lang="sr"><head><title>4zida.rs</title></head><body><div id="__next"></div>' + 'z'.repeat(2000) + '</body></html>';
+  const many = (n) => CHROME + BULK + '<body><main>' + Array.from({ length: n }, (_, i) =>
+    '<article><a href="/prodaja-stanova/nis/dvoiposoban-stan/' + id(7600 + i) + '">x</a><p>250.000 €</p></article>').join('') +
+    '</main></body></html>';
+  const rs = runWorkflow({ max_pages: 1 },
+    (url) => ({ body: /strana=/.test(url) ? CHROME + BULK + '<body><main></main></body></html>' : many(30), status: 200 }),
+    () => 'thin', shell);
+  ok('sustained thin pages stop the run as a soft block', !!rs.detailBlocked, rs.summary && rs.summary.errors_thin_shell_pages);
+  eq('with a distinct reason', rs.detailBlocked.block_reason, 'soft_block_thin_pages');
+  ok('and the alert says what to change', /premium_proxy|render_js/.test(rs.detailBlocked.block_detail), rs.detailBlocked.block_detail);
 }
 
 /* ---- end of results by page repetition (site clamps instead of emptying) ---- */

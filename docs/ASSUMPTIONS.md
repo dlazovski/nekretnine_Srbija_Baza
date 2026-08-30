@@ -139,6 +139,28 @@ we asked for, nothing is extracted and the row goes to `Errors` as
 no advertiser name also goes to `Errors` (`errors_no_advertiser_name`) rather
 than reaching `Results` with three of the four required fields.
 
+**F8. 26% of queued listings returned a page with no advertiser data.** Two
+sample failures were 131,794 and 131,749 bytes — **45 bytes apart**, and 12% the
+size of a real listing page (~1.1 MB measured across all five categories). Two
+different listings returning near-identical page sizes means one template with
+the slug swapped. Their URLs were perfectly well-formed, so this is not a link
+shape problem.
+That leaves two possibilities with **opposite** implications:
+* **ad_removed** — the ad is gone. Nothing to recover; skipping is correct.
+* **thin_shell** — the page came back without its server-rendered content, which
+  is how a site soft-blocks a scraper. That is *lost real data*, and silently
+  discarding it would quietly drop a quarter of the dataset.
+*Fix:* the two are now told apart by whether the page carries JSON-LD or the
+Next.js payload at all, and the error message records `bytes`, `jsonld`,
+`payload`, `author_block`, `says_removed` and the page title. A sustained rate
+of thin pages (≥40% after 20 listings) now stops the run as
+`soft_block_thin_pages` with instructions, rather than burning thousands of
+credits collecting shells — a block that carries no CAPTCHA or challenge marker
+and so was invisible to the existing detector.
+**Open one of the failing urls in a browser to settle it:** if the ad loads
+normally, it is a soft block and `premium_proxy=true` / a longer
+`delay_seconds` / `render_js=true` recovers the data.
+
 ### Why the probe reported "None — all Step 0 assumptions held"
 It checked whether a field was *found*, never whether the value was *right*.
 The report now also cross-checks results-page price against detail-page price
