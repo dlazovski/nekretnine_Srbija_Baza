@@ -33,12 +33,16 @@ const perCategory = Object.keys(list).filter(k => list[k].kind === 'list').map(k
         'listing, so the 100k filter cannot be trusted. Do not run the scraper until this is resolved.');
     }
   });
+  // Adjacent listings sharing a price is only suspicious when the price came
+  // from a heuristic scan. JSON-LD pairs a url with its own price inside one
+  // object, so a duplicate from that source is simply two listings priced alike.
   if (r.sample_listings && r.sample_listings.length > 1) {
     for (let i = 1; i < r.sample_listings.length; i++) {
-      if (r.sample_listings[i].price != null && r.sample_listings[i].price === r.sample_listings[i - 1].price) {
-        actions.push('[' + r.slug + '] Adjacent listings share a price (' + r.sample_listings[i].price +
-          '). Sometimes genuine, but it is also the fingerprint of a listing taking its neighbour\'s price — ' +
-          'open the two urls in sample_listings and confirm.');
+      const a = r.sample_listings[i - 1], b = r.sample_listings[i];
+      if (b.price != null && b.price === a.price && b.price_source !== 'jsonld') {
+        actions.push('[' + r.slug + '] Adjacent listings share a price (' + b.price + ') and it did NOT come ' +
+          'from the exact JSON-LD pairing (source: ' + b.price_source + '). That is the fingerprint of a listing ' +
+          'taking its neighbour\'s price — open both urls in sample_listings and confirm.');
         break;
       }
     }

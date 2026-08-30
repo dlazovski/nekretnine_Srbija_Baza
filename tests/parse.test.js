@@ -245,5 +245,39 @@ ok('the confirmed site number is excluded by default', A.SITE_PHONES.indexOf('02
   eq('the real name is used', advs[0].name, 'Marijana Milutinović');
 }
 
+/* --- BUG 4 (probe run 2): the phone fell back to the loose raw-HTML regex in
+ * 8 of 10 probes. Two causes, both visible in the captured phone_context:
+ *   a) the advertiser block is JSON nested inside JSON, so one unescape pass
+ *      leaves \" in place and every "key" pattern misses;
+ *   b) "phones" holds OBJECTS, so the number lives under "full"/"national".
+ * The fallback happened to pick the right number, but only because it was the
+ * first Serbian-looking number on the page — luck, not logic. --- */
+{
+  const id = 'f'.repeat(23) + '6';
+  // exactly the shape the live probe reported
+  const authorData = '"authorData\\":\\"{\\\\\\"id\\\\\\":1182253,\\\\\\"fullName\\\\\\":\\\\\\"Goran Stojanovic\\\\\\",' +
+    '\\\\\\"languages\\\\\\":[],\\\\\\"phones\\\\\\":[{\\\\\\"full\\\\\\":\\\\\\"+381693422234\\\\\\",\\\\\\"isViber\\\\\\":false,' +
+    '\\\\\\"national\\\\\\":\\\\\\"069 3422234\\\\\\",\\\\\\"regionCode\\\\\\":\\\\\\"RS\\\\\\",\\\\\\"verified\\\\\\":true}]}"';
+  const html = '<html><body>' + 'x'.repeat(2500) +
+    '<a href="/prodaja-kuca/borca-palilula-opstina-beograd/jednoetazna/' + id + '">K</a>' +
+    '<div>Kontakt: 011 4433221</div>' +
+    '<script>self.__next_f.push([1,"{\\"id\\":\\"' + id + '\\",\\"price\\":187000,' + authorData + '}"])</script>' +
+    '</body></html>';
+  const d = A.parseDetail(html, 'https://www.4zida.rs/prodaja-kuca/borca-palilula-opstina-beograd/jednoetazna/' + id);
+  eq('nested-JSON advertiser: phone found', d.phone, '0693422234');
+  ok('nested-JSON advertiser: from the phones key, not the raw-HTML fallback',
+     /^json:phones/.test(d.phone_source || ''), d.phone_source);
+  eq('nested-JSON advertiser: name found', d.advertiser_name, 'Goran Stojanovic');
+  eq('nested-JSON advertiser: price found', d.price_eur, 187000);
+  ok('no raw-html fallback warning', d.warnings.indexOf('phone_from_raw_html_fallback') === -1, d.warnings);
+  ok('an unrelated number on the page does not win', d.phone !== '0114433221', d.all_phones);
+}
+
+/* deepUnescape flattens however many levels are present, and is idempotent */
+eq('deepUnescape: one level', A.deepUnescape('{\\"a\\":1}'), '{"a":1}');
+eq('deepUnescape: two levels', A.deepUnescape('{\\\\\\"a\\\\\\":1}'), '{"a":1}');
+eq('deepUnescape: idempotent', A.deepUnescape(A.deepUnescape('{\\\\\\"a\\\\\\":1}')), '{"a":1}');
+eq('deepUnescape: leaves plain text alone', A.deepUnescape('{"a":1}'), '{"a":1}');
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -16,7 +16,18 @@ of these are worth checking by hand before a full 5-category run.
 
 ## 0. What Step 0 found (2026-08-30)
 
-### CONFIRMED
+### CONFIRMED (run 2, after the fixes)
+* **Prices are correct.** All 10 detail probes matched their results-page price,
+  across all five categories, with every price sourced from the exact JSON-LD
+  pairing. The neighbour-theft bug is gone: `prodaja-kuca` now reads
+  187000 / 345000 / 99000 where it previously read 187000 / **187000** / 345000.
+* **Phones are per-listing.** 10 probes returned 10 distinct numbers, none
+  shared across listings. The site switchboard no longer appears.
+* **Advertiser names resolve for both kinds of poster** — private individuals
+  ("Goran Stojanovic") and agencies ("Lav 2020 nekretnine") both via
+  `fullName`, with `author` as the alternate.
+
+### CONFIRMED (run 1)
 * **Pagination is `?strana=N`** — detected via `rel="next"` on all five categories.
 * **Out-of-range pages clamp** — `?strana=9999` returned HTTP 200 with 20 real
   listings, not an empty page. End-of-results must therefore be detected by
@@ -27,7 +38,13 @@ of these are worth checking by hand before a full 5-category run.
 * **Prices are not in the visible HTML.** The DOM-text strategy found 0 prices in
   every category; prices live in JSON-LD (20 per page) and in the Next.js flight
   payload (all 20–26 per page). The DOM strategy is now a last resort only.
-* **20–26 listings per results page**, varying by category.
+* **20–26 listings per results page**, varying by category. JSON-LD covers the
+  first 20; the payload scan covers the rest.
+* **Adjacent listings genuinely do share prices sometimes** (399000 twice among
+  commercial units). Since JSON-LD pairs a url with its own price inside one
+  object, a duplicate from that source is not evidence of mis-attribution, and
+  the probe only raises it as an action when the price came from a heuristic
+  scan instead.
 
 ### FAILED — found by the probe, fixed, regression-tested
 
@@ -60,6 +77,20 @@ from independent sources so a disagreement between them is real evidence.
 **F3. `"$7e"` was accepted as an advertiser name.** Next.js flight payloads
 serialise references that way. Harmless here only because a real name outranked
 it. *Fix:* `$`-prefixed and bare-hash strings are rejected as names.
+
+**F4. The phone fell back to the loose raw-HTML regex on 8 of 10 listings**
+(second probe run). Two causes, both visible in the captured `phone_context`:
+the advertiser block arrives as JSON nested inside JSON
+(`"authorData":"{\\"fullName\\":...}"`), so a single unescape pass left `\"`
+in place and every `"key"` pattern missed it; and `phones` holds **objects**,
+not strings — the number lives under `"full"` / `"national"`.
+The fallback did return the right number every time, but only because it was the
+first Serbian-looking number on the page: luck, not logic, and one unrelated
+number earlier in the markup would have taken its place.
+*Fix:* `deepUnescape()` flattens however many escaping levels are present
+(idempotent, bounded), and `"full"`/`"national"` inside a phone object are
+matched directly. Confirmed structure:
+`"phones":[{"full":"+381693422234","isViber":false,"national":"069 3422234","regionCode":"RS","verified":true}]`
 
 ### Why the probe reported "None — all Step 0 assumptions held"
 It checked whether a field was *found*, never whether the value was *right*.

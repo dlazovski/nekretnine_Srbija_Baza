@@ -47,7 +47,7 @@ in the run's execution data). Prices additionally come from two *independent*
 sources, and a disagreement between them is reported rather than resolved
 silently.
 
-Verified by 153 assertions, including regression tests reproducing both live
+Verified by 163 assertions, including regression tests reproducing both live
 bugs from the payload shapes the probe reported. See
 [Development](#development).
 
@@ -215,7 +215,7 @@ tests/               unit tests, structural validation, workflow simulation
 
 ```bash
 python3 build/build.py   # regenerate both workflow JSON files
-npm test                 # 153 assertions across 4 suites
+npm test                 # 163 assertions across 4 suites
 ```
 
 `tests/simulate.js` is the important one: it pulls the JavaScript **out of the

@@ -23,7 +23,7 @@ rec.block_reason = block.reason;
 rec.block_detail = block.detail;
 
 rec.has_jsonld = /application\/ld\+json/i.test(html);
-rec.has_nuxt_payload = /__NUXT__|__NUXT_DATA__|__NEXT_DATA__/.test(html);
+rec.has_nuxt_payload = /__NUXT__|__NUXT_DATA__|__NEXT_DATA__|self\.__next_f/.test(html);
 rec.title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [, ''])[1].trim().slice(0, 160);
 
 const parsed = parseListPage(html);

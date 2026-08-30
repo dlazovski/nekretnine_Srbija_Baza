@@ -26,6 +26,22 @@ function decodeEntities(s) {
     .replace(/&#39;|&apos;/gi, "'");
 }
 
+/* 4zida nests JSON inside JSON: the advertiser block arrives as
+ *   "authorData":"{\\"fullName\\":\\"...\\",\\"phones\\":[...]}"
+ * so a single unescape pass leaves \\" in place and every "key" pattern misses.
+ * Unescape repeatedly until the text stops changing (bounded), which flattens
+ * one, two or three levels alike. Idempotent, so it is safe to reapply. */
+function deepUnescape(s, maxPasses) {
+  var out = String(s == null ? '' : s);
+  for (var i = 0; i < (maxPasses || 4); i++) {
+    if (out.indexOf('\\') === -1) break;
+    var next = out.replace(/\\\\/g, '\\').replace(/\\"/g, '"').replace(/\\\//g, '/');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
 function stripTags(s) {
   return decodeEntities(String(s || '').replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -287,7 +303,7 @@ function listFromDomSpans(html, links) {
 /* Runs all three, prefers the strategy with the best price coverage, and
  * back-fills gaps from the others. Returns diagnostics for the probe report. */
 function parseListPage(html) {
-  var src = html.replace(/\\"/g, '"').replace(/\\\//g, '/');
+  var src = deepUnescape(html);
   var links = findListingLinks(html);
   // Blank the ld+json blocks (keeping length, so offsets stay valid) before the
   // payload scan, so the two strategies read genuinely independent sources and
@@ -528,8 +544,8 @@ var SITE_PHONES = ['0244155869'];
  * own array of contact numbers; "telephone" is generic schema.org and in
  * practice is the site switchboard, so it sits below everything listing-owned. */
 var PHONE_KEY_RANKS = {
-  phones: 5, phone: 8, phonenumber: 8, phone_number: 8, mobile: 8,
-  mobilni: 8, contactphone: 8, telefon: 10, telephone: 30
+  phones: 5, publicphones: 5, phone: 8, phonenumber: 8, phone_number: 8,
+  mobile: 8, mobilni: 8, contactphone: 8, telefon: 10, telephone: 30
 };
 
 /* A number sitting inside a block that names the site is the site's own. */
@@ -542,7 +558,7 @@ function looksSiteOwned(src, pos) {
  * ties are broken by proximity to the listing this page is about. */
 function extractPhones(html, excludeList, anchorPos) {
   var excl = SITE_PHONES.concat(excludeList || []).map(normalizePhone).filter(Boolean);
-  var src = html.replace(/\\"/g, '"');
+  var src = deepUnescape(html);
   var chrome = chromeRanges(src);
   var found = [], seen = Object.create(null);
 
@@ -563,11 +579,17 @@ function extractPhones(html, excludeList, anchorPos) {
 
   var m;
   // 1. explicit phone-carrying keys in the embedded payload
-  var reKey = /"(phones|phone|phoneNumber|phone_number|telefon|telephone|mobile|mobilni|contactPhone)"\s*:\s*(\[[^\]]*\]|"[^"]{6,25}")/gi;
+  var reKey = /"(phones|publicPhones|phone|phoneNumber|phone_number|telefon|telephone|mobile|mobilni|contactPhone)"\s*:\s*(\[[^\]]*\]|"[^"]{6,25}")/gi;
   while ((m = reKey.exec(src)) !== null) {
     var key = m[1], at = m.index, rank = PHONE_KEY_RANKS[key.toLowerCase()] || 12;
     String(m[2]).replace(/"([^"]{6,25})"/g, function (_, v) { push(v, 'json:' + key, rank, at); return _; });
   }
+  // 1b. 4zida's phone entries are objects, not strings:
+  //     "phones":[{"full":"+381693422234","isViber":false,"national":"069 3422234",...}]
+  //     so the number sits under "full"/"national" and the array regex alone misses it.
+  var reFull = /"(full|national)"\s*:\s*"([+\d][^"]{5,24})"/gi;
+  while ((m = reFull.exec(src)) !== null) push(m[2], 'json:phones.' + m[1], 6, m.index);
+
   // 2. tel: links and data-* attributes
   var reTel = /(?:href=["']tel:([^"']+)["']|data-(?:phone|telefon|tel)=["']([^"']+)["'])/gi;
   while ((m = reTel.exec(src)) !== null) push(m[1] || m[2], m[1] ? 'tel-href' : 'data-attr', 20, m.index);
@@ -599,7 +621,7 @@ function plausibleName(s) {
 }
 
 function extractAdvertiser(html, phoneRaw) {
-  var src = html.replace(/\\"/g, '"');
+  var src = deepUnescape(html);
   var cands = [], m;
 
   // 1. hydration JSON keys that name an advertiser
@@ -643,7 +665,7 @@ function extractAdvertiser(html, phoneRaw) {
 function parseDetail(html, url, opts) {
   opts = opts || {};
   var warnings = [];
-  var src = html.replace(/\\"/g, '"').replace(/\\\//g, '/');
+  var src = deepUnescape(html);
 
   // A detail page also carries "similar listings", each with its own price and
   // sometimes its own contact. Anchor everything to the id in the URL so those
@@ -713,7 +735,7 @@ function parseDetail(html, url, opts) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    decodeEntities: decodeEntities, stripTags: stripTags, normalizeNumberToken: normalizeNumberToken,
+    decodeEntities: decodeEntities, stripTags: stripTags, deepUnescape: deepUnescape, normalizeNumberToken: normalizeNumberToken,
     parsePriceEur: parsePriceEur, findPriceCandidates: findPriceCandidates, extractJsonLd: extractJsonLd,
     findListingLinks: findListingLinks, listingIdFromUrl: listingIdFromUrl, parseListPage: parseListPage,
     detectPaginationTemplate: detectPaginationTemplate, buildPageUrl: buildPageUrl, detectBlock: detectBlock,
