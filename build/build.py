@@ -247,7 +247,7 @@ main_conns = conn([
     ("Append to Errors", 0, "Count Error", 0),
     ("Count Error", 0, "Loop Over Listings", 0),
     ("Build Summary", 0, "Write Final Checkpoint", 0),
-    ("Write Final Checkpoint", 0, "Run Summary", 0),
+    ("Build Summary", 0, "Run Summary", 0),
 ])
 
 write("workflows/4zida-serbia-scraper.json", {

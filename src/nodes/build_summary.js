@@ -30,6 +30,8 @@ return [{ json: {
   errors_logged: errors,
   errors_wrong_page_ad_removed: s.detail_wrong_page || 0,
   errors_no_advertiser_name: s.detail_no_advertiser || 0,
+  error_rate_pct: queued ? Math.round(100 * errors / queued) : 0,
+  error_samples: s.error_samples || [],
   rows_with_a_blank_field: s.detail_blank_fields || 0,
   unaccounted: Math.max(0, queued - written - errors),
 

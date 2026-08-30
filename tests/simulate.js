@@ -184,6 +184,10 @@ ok('missing phone left blank, row still written', blank && blank.advertiser_name
 ok('blank field counted', r2.summary.rows_with_a_blank_field === 3, r2.summary.rows_with_a_blank_field);
 ok('errors carry link + message + category',
    r2.errors.every(e => e.link && e.error_message && e.category), r2.errors[0]);
+ok('summary carries sample failures so it can explain itself',
+   r2.summary.error_samples.length > 0 && r2.summary.error_samples[0].link && r2.summary.error_samples[0].reason,
+   r2.summary.error_samples[0]);
+eq('summary reports the error rate', r2.summary.error_rate_pct, 25);
 eq('error rows still balance', r2.summary.unaccounted, 0);
 
 /* --- a search-page URL must never reach Results as a price with no contact --- */
