@@ -9,6 +9,6 @@ return [{ json: {
   passed_filter: s.qualifying.length,
   written: s.detail_written || 0,
   errors: s.detail_errors || 0,
-  status: 'IN_PROGRESS',
+  status: s.dedup_total ? 'IN_PROGRESS' : 'PAGING',   // which phase was interrupted
   updated_at: new Date().toISOString()
 } }];

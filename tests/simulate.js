@@ -84,7 +84,7 @@ function runWorkflow(cfgOverrides, pageFor, detailKindFor) {
   out['Config'] = configItems(cfgOverrides);
   runNode('Init Pager', out['Config'], out, store);
 
-  const fetched = [];
+  const fetched = [], pageCheckpoints = [];
   let cur = out['Init Pager'][0], guard = 0;
   while (guard++ < 40) {
     fetched.push(cur.json.next_url);
@@ -92,6 +92,8 @@ function runWorkflow(cfgOverrides, pageFor, detailKindFor) {
     const parsed = runNode('Parse List Page', httpItem(resp.body, resp.status), out, store)[0];
     if (parsed.json.blocked) return { store, out, fetched, blocked: parsed.json };
     if (parsed.json.done) break;
+    // the pagination-phase checkpoint fires on the loop-back path
+    pageCheckpoints.push(runNode('Build Page Checkpoint Row', [parsed], out, store)[0].json);
     cur = parsed;
   }
 
@@ -120,7 +122,7 @@ function runWorkflow(cfgOverrides, pageFor, detailKindFor) {
     }
   }
   const summary = runNode('Build Summary', [{ json: {} }], out, store)[0].json;
-  return { store, out, fetched, results, errors, summary };
+  return { store, out, fetched, pageCheckpoints, results, errors, summary };
 }
 
 const pages = { 1: null, 2: null, 3: null };
@@ -151,6 +153,14 @@ eq('sample row', [r.results[0].advertiser_name, r.results[0].phone, r.results[0]
 ok('never fetched a sub-100k detail page', r.results.every(x => x.price_eur > 100000));
 ok('site support number never used as advertiser phone', r.results.every(x => x.phone !== '0113334444'));
 eq('category label', r.results[0].category, 'Stanovi (apartments)');
+
+/* a run interrupted during pagination must still have somewhere to resume from */
+ok('checkpoints are written during the pagination phase', r.pageCheckpoints.length > 0, r.pageCheckpoints.length);
+eq('pagination checkpoint is labelled PAGING', r.pageCheckpoints[0].status, 'PAGING');
+eq('pagination checkpoint records the completed page', r.pageCheckpoints[0].last_page, 1);
+ok('pagination checkpoint carries the category', r.pageCheckpoints[0].category === 'Stanovi (apartments)');
+ok('detail-phase checkpoint switches to IN_PROGRESS',
+   runNode('Build Checkpoint Row', [{ json: {} }], r.out, r.store)[0].json.status === 'IN_PROGRESS');
 
 /* ---- mixed advertisers, missing fields, fetch errors ---- */
 const kinds = {};

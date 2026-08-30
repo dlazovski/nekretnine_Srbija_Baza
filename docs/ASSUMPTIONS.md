@@ -92,6 +92,23 @@ number earlier in the markup would have taken its place.
 matched directly. Confirmed structure:
 `"phones":[{"full":"+381693422234","isViber":false,"national":"069 3422234","regionCode":"RS","verified":true}]`
 
+**F5. The "site-owned number" demotion fired on real advertisers.** Every
+advertiser block mentions 4zida, because the poster's avatar is served from
+`resizer2.4zida.rs`. Matching the bare word added +200 to legitimate numbers —
+observed live as rank 207.5 on a genuine advertiser phone. It did not change any
+result in the probe, but on a listing whose only phone sat near its avatar URL, a
+junk number from the raw-HTML fallback (rank ~51) would have won.
+*Fix:* the test is now `info@4zida.rs` or a schema.org `Organization`/`WebSite`
+type, not the bare word. Both directions are regression-tested: a real advertiser
+with a CDN avatar keeps a low rank, and a number inside the site's own contact
+entity is still demoted.
+
+### Run 3 (2026-08-30, final): clean
+All 16 requests HTTP 200. Every phone from a listing-owned key
+(`json:phones`, `json:phones.full`, `json:phones.national`) — no raw-HTML
+fallbacks. 10 probes, 10 distinct phones. All 10 list-vs-detail price checks
+matched. Zero strategy disagreements. Zero warnings. `actions_required` empty.
+
 ### Why the probe reported "None — all Step 0 assumptions held"
 It checked whether a field was *found*, never whether the value was *right*.
 The report now also cross-checks results-page price against detail-page price

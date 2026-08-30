@@ -279,5 +279,35 @@ eq('deepUnescape: two levels', A.deepUnescape('{\\\\\\"a\\\\\\":1}'), '{"a":1}')
 eq('deepUnescape: idempotent', A.deepUnescape(A.deepUnescape('{\\\\\\"a\\\\\\":1}')), '{"a":1}');
 eq('deepUnescape: leaves plain text alone', A.deepUnescape('{"a":1}'), '{"a":1}');
 
+/* --- BUG 5 (probe run 3): the "site-owned" demotion fired on real advertisers.
+ * Every advertiser block mentions 4zida because the avatar is served from
+ * resizer2.4zida.rs, so matching the bare word added +200 to legitimate
+ * numbers. Observed live as a rank of 207.5 on a genuine advertiser phone. --- */
+{
+  const advertiser = '{"avatar":"https://resizer2.4zida.rs/unsigned/plain/local:///users/1187811/96/eb.jpg",' +
+    '"fullName":"Milan Matovic","phones":[{"full":"+381691909090","national":"069 1909090"}]}';
+  const c = A.extractPhones('<html><body>' + advertiser + '</body></html>');
+  eq('advertiser phone survives the CDN avatar url', c[0].phone, '0691909090');
+  ok('advertiser phone is not demoted as site-owned', c[0].rank < 100, c[0]);
+}
+{
+  // the real Organization block must still be demoted
+  const org = '<script type="application/ld+json">{"@type":"Organization","name":"4zida",' +
+    '"telephone":"+381244155869","email":"info@4zida.rs"}</script>';
+  const advertiser = '{"fullName":"Ana","phones":[{"full":"+381641112223"}]}';
+  const c = A.extractPhones('<html><head>' + org + '</head><body>' + advertiser + '</body></html>');
+  eq('advertiser still beats the site contact block', c[0].phone, '0641112223');
+  ok('site number is excluded outright', !c.some(x => x.phone === '0244155869'), c);
+}
+{
+  // a number inside the site's own contact entity is demoted even if unlisted
+  const org = '<div>{"@type":"Organization","name":"4zida","telephone":"+381119998887"}</div>';
+  const advertiser = '<div>' + 'y'.repeat(900) + '{"phones":[{"full":"+381641112223"}]}</div>';
+  const c = A.extractPhones('<html><body>' + org + advertiser + '</body></html>');
+  eq('unlisted site number loses to the advertiser', c[0].phone, '0641112223');
+  ok('unlisted site number is demoted', c.find(x => x.phone === '0119998887').rank >= 200,
+     c.find(x => x.phone === '0119998887'));
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

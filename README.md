@@ -47,7 +47,7 @@ in the run's execution data). Prices additionally come from two *independent*
 sources, and a disagreement between them is reported rather than resolved
 silently.
 
-Verified by 163 assertions, including regression tests reproducing both live
+Verified by 174 assertions, including regression tests reproducing both live
 bugs from the payload shapes the probe reported. See
 [Development](#development).
 
@@ -104,6 +104,7 @@ healthy `stage1_listings_scanned` with everything filtered out at Stage 1.
 | `results_tab` / `errors_tab` / `checkpoint_tab` | `Results` / `Errors` / `Checkpoint` | Tab names. |
 | `delay_seconds` | `2.5` | Politeness pause before every detail request. |
 | `checkpoint_every` | `25` | Write a checkpoint every N successful rows. |
+| `checkpoint_every_pages` | `25` | Write a checkpoint every N results pages, so a run interrupted during pagination is also resumable. |
 | `max_pages` | `0` | `0` = unlimited. Set to `2` for a cheap smoke test. |
 | `resume_from_page` | `1` | See [Resuming](#resuming-an-interrupted-run). |
 | `resume_after_listing_id` | *(blank)* | See [Resuming](#resuming-an-interrupted-run). |
@@ -181,6 +182,32 @@ The Step 0 probe checks all of them automatically.
 
 ---
 
+## Scale: what a full category actually costs
+
+Measured from the probe: ~26 listings per results page, ~2 s per ScrapingBee
+request, and the `delay_seconds` pause applies to detail requests only.
+Apartments (34,128 listings) works out at ~1,313 results pages (~45 min), plus
+one detail request per listing above 100,000 EUR:
+
+| Share above 100k | Detail requests | Total requests | Detail phase |
+|---|---|---|---|
+| 20% | ~6,800 | ~8,100 | ~8.5 h |
+| 30% | ~10,200 | ~11,600 | ~13 h |
+| 40% | ~13,700 | ~15,000 | ~17 h |
+
+That is one long n8n execution. **Run it in chunks**: set `max_pages` to 200
+(~7 chunks of roughly 2 h for apartments), and between chunks copy `Last Page`
+from the `Checkpoint` tab into `resume_from_page`. The other four categories are
+far smaller, and garages should yield ~0 rows.
+
+Two consequences of a multi-hour run worth knowing: listings shift between pages
+as new ones are posted, so a few may be missed or seen twice (duplicates are
+dropped by listing id, misses are not recoverable without a re-run); and the
+`Checkpoint` tab is what tells you where to resume, not arithmetic on
+`max_pages`.
+
+---
+
 ## If requests fail
 
 The probe report leads with a verdict. If it says **`EVERY REQUEST FAILED`**,
@@ -215,7 +242,7 @@ tests/               unit tests, structural validation, workflow simulation
 
 ```bash
 python3 build/build.py   # regenerate both workflow JSON files
-npm test                 # 163 assertions across 4 suites
+npm test                 # 174 assertions across 4 suites
 ```
 
 `tests/simulate.js` is the important one: it pulls the JavaScript **out of the

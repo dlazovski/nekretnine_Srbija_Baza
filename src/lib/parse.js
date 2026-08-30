@@ -548,9 +548,15 @@ var PHONE_KEY_RANKS = {
   mobile: 8, mobilni: 8, contactphone: 8, telefon: 10, telephone: 30
 };
 
-/* A number sitting inside a block that names the site is the site's own. */
+/* A number sitting inside the site's OWN contact entity is 4zida's, not the
+ * advertiser's. The test must be specific: every advertiser block also mentions
+ * 4zida, because their avatar is served from resizer2.4zida.rs — matching the
+ * bare word demoted real advertisers by 200 and could have let a junk number
+ * win on any listing whose only phone sat near its avatar URL. */
+var SITE_CONTACT_RE = /info@4zida\.rs|"@type"\s*:\s*"(?:Organization|WebSite|WebPage)"/i;
+
 function looksSiteOwned(src, pos) {
-  return pos != null && /4zida/i.test(src.slice(Math.max(0, pos - 400), pos + 400));
+  return pos != null && SITE_CONTACT_RE.test(src.slice(Math.max(0, pos - 400), pos + 400));
 }
 
 /* Ranked phone candidates, best first. Listing-specific keys outrank generic
