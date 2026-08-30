@@ -47,7 +47,7 @@ in the run's execution data). Prices additionally come from two *independent*
 sources, and a disagreement between them is reported rather than resolved
 silently.
 
-Verified by 174 assertions, including regression tests reproducing both live
+Verified by 181 assertions, including regression tests reproducing both live
 bugs from the payload shapes the probe reported. See
 [Development](#development).
 
@@ -208,6 +208,19 @@ dropped by listing id, misses are not recoverable without a re-run); and the
 
 ---
 
+## Reading the run summary
+
+Two fields worth checking after every run:
+
+* `stage1_rejected_not_a_listing_url` — links whose shape is not
+  `/{category}/{location}/{type}/{id}`. These resolve to search pages, so they
+  are dropped before costing a detail request. A handful per page is normal;
+  `rejected_url_samples` shows what they were.
+* `errors_no_advertiser_block` — detail pages that returned neither a name nor a
+  phone. These go to the `Errors` tab with their link rather than to `Results`
+  as a price with no contact. A non-zero count means some link shape is still
+  slipping through — send the links in that tab.
+
 ## If requests fail
 
 The probe report leads with a verdict. If it says **`EVERY REQUEST FAILED`**,
@@ -242,7 +255,7 @@ tests/               unit tests, structural validation, workflow simulation
 
 ```bash
 python3 build/build.py   # regenerate both workflow JSON files
-npm test                 # 174 assertions across 4 suites
+npm test                 # 181 assertions across 4 suites
 ```
 
 `tests/simulate.js` is the important one: it pulls the JavaScript **out of the

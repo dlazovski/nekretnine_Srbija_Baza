@@ -109,6 +109,21 @@ All 16 requests HTTP 200. Every phone from a listing-owned key
 fallbacks. 10 probes, 10 distinct phones. All 10 list-vs-detail price checks
 matched. Zero strategy disagreements. Zero warnings. `actions_required` empty.
 
+**F6. Non-listing URLs were being scraped as listings** (first real run, 2 pages
+of apartments: 10 of 44 rows had a price and a link but no name and no phone,
+and their links opened a search page).
+`LISTING_PATH_RE` matched any `/prodaja-*/…/{24-hex}` path with **one or more**
+segments before the id. Every genuine listing URL has exactly **three**
+(`/{category}/{location}/{type}/{id}`) — confirmed on every listing across three
+probe runs and all five categories. Shorter shapes exist in the markup and
+resolve to search pages, which carry no advertiser block.
+*Fix, two layers:* URLs with fewer than three segments before the id are dropped
+at Stage 1 — before they cost a detail request — and counted in the summary as
+`stage1_rejected_not_a_listing_url`, with samples. And a detail page yielding
+**neither** a name nor a phone is now logged to the `Errors` tab with the reason
+instead of being written to `Results` as a price with no contact. The second
+layer catches this class of problem whatever its cause.
+
 ### Why the probe reported "None — all Step 0 assumptions held"
 It checked whether a field was *found*, never whether the value was *right*.
 The report now also cross-checks results-page price against detail-page price
@@ -130,7 +145,7 @@ that repeats across unrelated listings, flags a phone taken from the generic
 
 ## B. Assumptions I made, that the brief did not settle
 
-### B1 — Listing links end in a 24-character hex id  — **CONFIRMED**
+### B1 — Listing links end in a 24-character hex id  — **CONFIRMED**, with a minimum depth (see F6)
 Every listing URL is assumed to look like
 `/prodaja-{kind}/{location}/{type}/{24-hex-id}`, e.g.
 `…/trosoban-stan/6a91d04359e6b8eb78023435` (the one example in the brief).

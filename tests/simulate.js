@@ -106,7 +106,9 @@ function runWorkflow(cfgOverrides, pageFor, detailKindFor) {
       const kind = detailKindFor ? detailKindFor(lid) : 'private';
       const resp = kind === 'fetcherror'
         ? [{ json: { error: { message: 'ECONNRESET' } } }]
-        : httpItem(detailPage(lid, kind), 200);
+        : kind === 'searchpage'
+          ? httpItem(CHROME + BULK + '<body><h1>Pretraga rezultati</h1><div>250.000 €</div></body></html>', 200)
+          : httpItem(detailPage(lid, kind), 200);
       const ex = runNode('Extract 4 Fields', resp, out, store)[0];
       if (ex.json.blocked) return { store, out, fetched, detailBlocked: ex.json };
       if (ex.json.status === 'ok') {
@@ -177,6 +179,34 @@ ok('blank field counted', r2.summary.rows_with_a_blank_field === 3, r2.summary.r
 ok('errors carry link + message + category',
    r2.errors.every(e => e.link && e.error_message && e.category), r2.errors[0]);
 eq('error rows still balance', r2.summary.unaccounted, 0);
+
+/* --- a search-page URL must never reach Results as a price with no contact --- */
+{
+  const searchUrlPage = (n) => CHROME + BULK + '<body><main>' +
+    '<article><a href="/prodaja-stanova/vracar-beograd/trosoban-stan/' + id(7000 + n) + '">ok</a><p>250.000 €</p></article>' +
+    '<article><a href="/prodaja-stanova/beograd/' + id(8000 + n) + '">search page</a><p>300.000 €</p></article>' +
+    '</main></body></html>';
+  PRICES[id(7000)] = 250000;
+  const rs = runWorkflow({ max_pages: 1 },
+    (url) => ({ body: /strana=/.test(url) ? CHROME + BULK + '<body><main></main></body></html>' : searchUrlPage(0), status: 200 }));
+  eq('non-listing url shape is rejected before costing a request', rs.summary.stage1_rejected_not_a_listing_url, 1);
+  ok('the rejected url is reported for inspection',
+     /\/prodaja-stanova\/beograd\//.test(rs.summary.rejected_url_samples[0] || ''), rs.summary.rejected_url_samples);
+  eq('only the real listing was queued', rs.summary.detail_pages_queued, 1);
+}
+{
+  // even if such a url slipped through, a page with no advertiser block goes to Errors
+  const bare = CHROME + BULK + '<body><h1>Pretraga</h1><div>250.000 €</div></body></html>';
+  const rs = runWorkflow({ max_pages: 1 },
+    (url) => ({ body: /strana=/.test(url) ? CHROME + BULK + '<body><main></main></body></html>'
+      : CHROME + BULK + '<body><main><article><a href="/prodaja-stanova/vracar-beograd/trosoban-stan/' + id(7100) +
+        '">x</a><p>250.000 €</p></article></main></body></html>', status: 200 }),
+    () => 'searchpage');
+  eq('page with no advertiser block is logged as an error, not written', [rs.summary.written_to_sheet, rs.summary.errors_logged], [0, 1]);
+  eq('and is counted separately', rs.summary.errors_no_advertiser_block, 1);
+  ok('the error names the cause', /no advertiser block/.test(rs.errors[0].error_message), rs.errors[0].error_message);
+  ok('the bad link is preserved for inspection', !!rs.errors[0].link);
+}
 
 /* ---- end of results by page repetition (site clamps instead of emptying) ---- */
 const clampServe = (url) => {

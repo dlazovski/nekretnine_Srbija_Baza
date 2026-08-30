@@ -60,6 +60,8 @@ if (!s.calibrated) {
 const parsed = parseListPage(html);
 const ids = parsed.listings.map(l => l.listing_id);
 s.strategies_used[parsed.diagnostics.best_strategy] = (s.strategies_used[parsed.diagnostics.best_strategy] || 0) + 1;
+s.rejected_url_shape = (s.rejected_url_shape || 0) + parsed.diagnostics.rejected_url_shape;
+s.rejected_url_samples = (s.rejected_url_samples || []).concat(parsed.diagnostics.rejected_url_samples).slice(0, 5);
 
 // End of results: nothing on the page, or the site clamped us back to a page
 // we have already seen (both observed shapes of "past the last page").

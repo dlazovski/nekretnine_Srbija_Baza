@@ -153,8 +153,20 @@ function absolutize(path) {
   return ZIDA_ORIGIN + (path.charAt(0) === '/' ? '' : '/') + path;
 }
 
+/* A real 4zida listing URL is /{category}/{location}/{type}/{id} — three path
+ * segments before the id, confirmed on every listing seen across three live
+ * probe runs and all five categories. Shorter shapes exist in the markup and
+ * resolve to SEARCH pages, not ads: they have no advertiser block, so they
+ * produced rows with a price and a link but no name and no phone. */
+var LISTING_URL_MIN_DEPTH = 3;
+
+function pathDepthBeforeId(path) {
+  return String(path).split('/').filter(Boolean).length - 1;
+}
+
 /* All listing links on a page, in document order, first occurrence per id.
- * `pos` is where that id is first mentioned — used to slice cards apart. */
+ * `pos` is where that id is first mentioned — used to slice cards apart.
+ * `depth` is the segment count, so callers can reject non-listing shapes. */
 function findListingLinks(html) {
   var seen = Object.create(null), out = [];
   var src = html.replace(/\\\//g, '/');           // un-escape JSON-embedded hrefs
@@ -165,7 +177,7 @@ function findListingLinks(html) {
     if (/_nuxt|\.(?:js|css|png|jpe?g|webp|svg|woff2?)$/i.test(path)) continue;
     if (seen[id]) continue;
     seen[id] = true;
-    out.push({ id: id, url: absolutize(path), pos: m.index });
+    out.push({ id: id, url: absolutize(path), pos: m.index, depth: pathDepthBeforeId(path) });
   }
   return out;
 }
@@ -331,7 +343,7 @@ function parseListPage(html) {
 
   var merged = Object.create(null);
   (links.length ? links : strategies.jsonld).forEach(function (l) {
-    merged[l.id] = { listing_id: l.id, url: l.url, price: null, price_source: null, price_on_request: false };
+    merged[l.id] = { listing_id: l.id, url: l.url, depth: l.depth, price: null, price_source: null, price_on_request: false };
   });
   PREFERENCE.forEach(function (name) {
     strategies[name].forEach(function (r) {
@@ -357,7 +369,9 @@ function parseListPage(html) {
   });
 
   // Adjacent listings sharing a price is the fingerprint of the neighbour-theft bug.
-  var listings = Object.keys(merged).map(function (k) { return merged[k]; });
+  var all = Object.keys(merged).map(function (k) { return merged[k]; });
+  var rejected = all.filter(function (l) { return l.depth != null && l.depth < LISTING_URL_MIN_DEPTH; });
+  var listings = all.filter(function (l) { return l.depth == null || l.depth >= LISTING_URL_MIN_DEPTH; });
   var adjacentDupes = 0;
   for (var i = 1; i < listings.length; i++) {
     if (listings[i].price != null && listings[i].price === listings[i - 1].price) adjacentDupes++;
@@ -374,7 +388,9 @@ function parseListPage(html) {
       unpriced: listings.filter(function (l) { return l.price == null; }).length,
       strategy_disagreements: disagreements.slice(0, 10),
       strategy_disagreement_count: disagreements.length,
-      adjacent_duplicate_prices: adjacentDupes
+      adjacent_duplicate_prices: adjacentDupes,
+      rejected_url_shape: rejected.length,
+      rejected_url_samples: rejected.slice(0, 5).map(function (l) { return l.url; })
     }
   };
 }
@@ -743,7 +759,8 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     decodeEntities: decodeEntities, stripTags: stripTags, deepUnescape: deepUnescape, normalizeNumberToken: normalizeNumberToken,
     parsePriceEur: parsePriceEur, findPriceCandidates: findPriceCandidates, extractJsonLd: extractJsonLd,
-    findListingLinks: findListingLinks, listingIdFromUrl: listingIdFromUrl, parseListPage: parseListPage,
+    findListingLinks: findListingLinks, pathDepthBeforeId: pathDepthBeforeId,
+    LISTING_URL_MIN_DEPTH: LISTING_URL_MIN_DEPTH, listingIdFromUrl: listingIdFromUrl, parseListPage: parseListPage,
     detectPaginationTemplate: detectPaginationTemplate, buildPageUrl: buildPageUrl, detectBlock: detectBlock,
     normalizePhone: normalizePhone, extractPhones: extractPhones, extractAdvertiser: extractAdvertiser,
     parseDetail: parseDetail, ZIDA_ORIGIN: ZIDA_ORIGIN,

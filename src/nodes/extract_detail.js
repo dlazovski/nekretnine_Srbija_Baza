@@ -43,6 +43,17 @@ if (d.price_eur !== '' && Number(src.list_price) !== Number(d.price_eur)) {
 }
 const finalPrice = d.price_eur !== '' ? d.price_eur : src.list_price;
 
+if (!d.advertiser_name && !d.phone) {
+  // No advertiser block at all: almost always means the link is not an ad page
+  // (a search/listing URL that slipped through), so the row belongs in Errors
+  // where it is visible, not in Results as a price with no contact.
+  s.detail_no_advertiser = (s.detail_no_advertiser || 0) + 1;
+  return [{ json: Object.assign({}, base, {
+    status: 'error', blocked: false,
+    error_message: 'no advertiser block on the page (no name and no phone) — the link is probably not a listing page. ' +
+      'Page bytes: ' + html.length + '; author block present: ' + /authorData|"phones"/.test(html)
+  }) }];
+}
 if (!d.advertiser_name || !d.phone || finalPrice === '') s.detail_blank_fields++;
 
 return [{ json: Object.assign({}, base, {

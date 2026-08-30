@@ -18,6 +18,8 @@ return [{ json: {
 
   stage1_listings_scanned: s.scanned,
   stage1_skipped_no_price: s.unpriced,
+  stage1_rejected_not_a_listing_url: s.rejected_url_shape || 0,
+  rejected_url_samples: s.rejected_url_samples || [],
   stage1_below_threshold: s.below_threshold,
   stage1_passed_price_filter: s.qualifying.length,
   duplicates_dropped: s.duplicates_dropped || 0,
@@ -26,6 +28,7 @@ return [{ json: {
 
   written_to_sheet: written,
   errors_logged: errors,
+  errors_no_advertiser_block: s.detail_no_advertiser || 0,
   rows_with_a_blank_field: s.detail_blank_fields || 0,
   unaccounted: Math.max(0, queued - written - errors),
 
