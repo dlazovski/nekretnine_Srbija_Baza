@@ -43,15 +43,27 @@ if (d.price_eur !== '' && Number(src.list_price) !== Number(d.price_eur)) {
 }
 const finalPrice = d.price_eur !== '' ? d.price_eur : src.list_price;
 
-if (!d.advertiser_name && !d.phone) {
-  // No advertiser block at all: almost always means the link is not an ad page
-  // (a search/listing URL that slipped through), so the row belongs in Errors
-  // where it is visible, not in Results as a price with no contact.
+// Identity check first: is this even the page we asked for? A removed or
+// expired ad is redirected by 4zida to a search page, and scraping THAT yields
+// a real phone belonging to somebody else's listing — worse than a blank row.
+if (!d.page_references_listing) {
+  s.detail_wrong_page = (s.detail_wrong_page || 0) + 1;
+  return [{ json: Object.assign({}, base, {
+    status: 'error', blocked: false,
+    error_message: 'fetched page does not reference listing id ' + src.listing_id +
+      ' — the ad was probably removed and the site redirected to a search page. ' +
+      'Nothing was extracted from it. Page bytes: ' + html.length
+  }) }];
+}
+
+// The advertiser name is one of the four deliverable fields and comes from the
+// same block as the phone; a page missing it is not a normal ad page.
+if (!d.advertiser_name) {
   s.detail_no_advertiser = (s.detail_no_advertiser || 0) + 1;
   return [{ json: Object.assign({}, base, {
     status: 'error', blocked: false,
-    error_message: 'no advertiser block on the page (no name and no phone) — the link is probably not a listing page. ' +
-      'Page bytes: ' + html.length + '; author block present: ' + /authorData|"phones"/.test(html)
+    error_message: 'no advertiser name on the page (phone found: ' + (d.phone ? 'yes' : 'no') +
+      '). Author block present: ' + /authorData|"phones"/.test(html) + '; page bytes: ' + html.length
   }) }];
 }
 if (!d.advertiser_name || !d.phone || finalPrice === '') s.detail_blank_fields++;

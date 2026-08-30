@@ -745,6 +745,12 @@ function parseDetail(html, url, opts) {
     link: url,
     // diagnostics (not written to the Results tab)
     listing_id: targetId,
+    // A real ad page always references its own id (canonical url, payload).
+    // When it does not, we were served something else — 4zida redirects a
+    // removed or expired ad to a search page, which carries other people's
+    // phone numbers. Extracting from it produces a REAL phone attached to the
+    // WRONG listing, which is worse than a blank.
+    page_references_listing: anchorPos !== null,
     price_source: priceCands.length ? priceCands[0].source : null,
     phone_source: phones.length ? phones[0].source : null,
     phone_raw: phones.length ? phones[0].raw : '',

@@ -39,13 +39,14 @@ function detailPage(lid, kind) {
   const price = PRICES[lid];
   if (kind === 'agency') {
     return CHROME + BULK + '<body><h1>Stan</h1><div>' + price.toLocaleString('de-DE') + ' €</div>' +
+      '<link rel="canonical" href="https://www.4zida.rs/prodaja-stanova/a/b/' + lid + '">' +
       '<script type="application/ld+json">{"@type":"Offer","price":' + price + ',"priceCurrency":"EUR",' +
       '"seller":{"@type":"RealEstateAgent","name":"Alfa Nekretnine DOO"}}</script>' +
       '<span itemprop="telephone" content="0631112223"></span></body></html>';
   }
   if (kind === 'nophone') {
     return CHROME + BULK + '<body><h1>Stan</h1><div>' + price.toLocaleString('de-DE') + ' €</div>' +
-      '<script>window.__NUXT__={ad:{"advertiserName":"Ana Jovanović"}}</script></body></html>';
+      '<script>{"id":"' + lid + '","advertiserName":"Ana Jovanović"}</script></body></html>';
   }
   return CHROME + BULK + '<head><script type="application/ld+json">{"@type":"Product","offers":{"price":"' + price +
     '","priceCurrency":"EUR"}}</script></head><body><header><a href="tel:0113334444">podrska</a></header>' +
@@ -79,7 +80,7 @@ function configItems(overrides) {
 const httpItem = (body, status) => [{ json: { body: body, statusCode: status === undefined ? 200 : status, headers: {} } }];
 
 /* ------------------------------------------------- run the whole thing -- */
-function runWorkflow(cfgOverrides, pageFor, detailKindFor) {
+function runWorkflow(cfgOverrides, pageFor, detailKindFor, customDetailHtml) {
   const store = {}, out = {};
   out['Config'] = configItems(cfgOverrides);
   runNode('Init Pager', out['Config'], out, store);
@@ -108,7 +109,12 @@ function runWorkflow(cfgOverrides, pageFor, detailKindFor) {
         ? [{ json: { error: { message: 'ECONNRESET' } } }]
         : kind === 'searchpage'
           ? httpItem(CHROME + BULK + '<body><h1>Pretraga rezultati</h1><div>250.000 €</div></body></html>', 200)
-          : httpItem(detailPage(lid, kind), 200);
+          : kind === 'removed'
+            ? httpItem(CHROME + BULK + '<body><h1>Pretraga</h1><div>250.000 €</div><script>{"id":"' + id(7200) +
+                '","fullName":"Neko Drugi","phones":[{"full":"+381641234567"}]}</script></body></html>', 200)
+            : kind === 'noname'
+              ? httpItem(customDetailHtml, 200)
+              : httpItem(detailPage(lid, kind), 200);
       const ex = runNode('Extract 4 Fields', resp, out, store)[0];
       if (ex.json.blocked) return { store, out, fetched, detailBlocked: ex.json };
       if (ex.json.status === 'ok') {
@@ -203,9 +209,44 @@ eq('error rows still balance', r2.summary.unaccounted, 0);
         '">x</a><p>250.000 €</p></article></main></body></html>', status: 200 }),
     () => 'searchpage');
   eq('page with no advertiser block is logged as an error, not written', [rs.summary.written_to_sheet, rs.summary.errors_logged], [0, 1]);
-  eq('and is counted separately', rs.summary.errors_no_advertiser_block, 1);
-  ok('the error names the cause', /no advertiser block/.test(rs.errors[0].error_message), rs.errors[0].error_message);
+  eq('and is counted as a wrong page', rs.summary.errors_wrong_page_ad_removed, 1);
+  ok('the error names the cause', /does not reference listing id/.test(rs.errors[0].error_message), rs.errors[0].error_message);
   ok('the bad link is preserved for inspection', !!rs.errors[0].link);
+}
+
+/* --- a REMOVED ad redirected to a search page must not donate someone else's
+ * phone number to this listing. The page carries a real, valid Serbian number;
+ * the only thing that distinguishes it is that it never mentions our id. --- */
+{
+  const other = id(7200);
+  const searchPageWithSomeoneElsesPhone = CHROME + BULK +
+    '<body><h1>Pretraga</h1><div>250.000 €</div>' +
+    '<script>{"id":"' + other + '","fullName":"Neko Drugi","phones":[{"full":"+381641234567"}]}</script></body></html>';
+  const rs = runWorkflow({ max_pages: 1 },
+    (url) => ({ body: /strana=/.test(url) ? CHROME + BULK + '<body><main></main></body></html>'
+      : CHROME + BULK + '<body><main><article><a href="/prodaja-stanova/vracar-beograd/trosoban-stan/' + id(7300) +
+        '">x</a><p>250.000 €</p></article></main></body></html>', status: 200 }),
+    () => 'removed');
+  eq('a removed ad is never written to Results', rs.summary.written_to_sheet, 0);
+  eq('it is logged as a wrong page', rs.summary.errors_wrong_page_ad_removed, 1);
+  ok('somebody else\'s phone is not harvested from it',
+     !JSON.stringify(rs.results).includes('0641234567'), rs.results);
+  ok('the error explains the redirect', /removed/.test(rs.errors[0].error_message), rs.errors[0].error_message);
+}
+
+/* --- a page that IS the listing but has no advertiser name goes to Errors too,
+ * rather than reaching Results as three of the four required fields --- */
+{
+  const lid = id(7400);
+  const noName = CHROME + BULK + '<body><script>{"id":"' + lid +
+    '","phones":[{"full":"+381641234567"}]}</script><div>250.000 €</div></body></html>';
+  const rs = runWorkflow({ max_pages: 1 },
+    (url) => ({ body: /strana=/.test(url) ? CHROME + BULK + '<body><main></main></body></html>'
+      : CHROME + BULK + '<body><main><article><a href="/prodaja-stanova/vracar-beograd/trosoban-stan/' + lid +
+        '">x</a><p>250.000 €</p></article></main></body></html>', status: 200 }),
+    () => 'noname', noName);
+  eq('missing advertiser name is logged, not written', [rs.summary.written_to_sheet, rs.summary.errors_logged], [0, 1]);
+  eq('counted as a missing name', rs.summary.errors_no_advertiser_name, 1);
 }
 
 /* ---- end of results by page repetition (site clamps instead of emptying) ---- */

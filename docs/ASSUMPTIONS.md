@@ -124,6 +124,21 @@ at Stage 1 — before they cost a detail request — and counted in the summary 
 instead of being written to `Results` as a price with no contact. The second
 layer catches this class of problem whatever its cause.
 
+**F7. A removed ad donated someone else's phone number.** After F6, one row
+still carried a price, a phone and a link that opened a search page — but no
+advertiser name. The URL was listing-shaped (three segments), so the depth rule
+passed it. 4zida redirects a removed or expired ad to a search page, and that
+page carries other advertisers' numbers, so the raw-HTML fallback found a real,
+valid Serbian mobile and attached it to the wrong listing. **A real phone on the
+wrong row is worse than a blank one.**
+*Fix:* an identity check runs before anything is extracted — a real ad page
+always references its own 24-hex id (canonical url, payload; this is also why
+the id-anchored price lookup works). If the fetched page never mentions the id
+we asked for, nothing is extracted and the row goes to `Errors` as
+`errors_wrong_page_ad_removed`. Separately, a page that *is* the listing but has
+no advertiser name also goes to `Errors` (`errors_no_advertiser_name`) rather
+than reaching `Results` with three of the four required fields.
+
 ### Why the probe reported "None — all Step 0 assumptions held"
 It checked whether a field was *found*, never whether the value was *right*.
 The report now also cross-checks results-page price against detail-page price
