@@ -178,23 +178,92 @@ function listFromJsonLd(html) {
   return Object.keys(byId).map(function (k) { return byId[k]; });
 }
 
-/* Strategy B — hydration/embedded JSON: a "price"-ish key sitting near the
- * listing id inside a <script> payload (Nuxt/Next state, inline JSON, etc). */
-function listFromJsonWindow(html, links) {
-  var src = html.replace(/\\"/g, '"').replace(/\\\//g, '/');
-  return links.map(function (l) {
-    var price = null;
-    var at = src.indexOf(l.id);
-    while (at !== -1 && price === null) {
-      var win = src.slice(Math.max(0, at - 1500), at + 1500);
-      var m = win.match(/"(?:price|cena|priceEur|price_eur|totalPrice)"\s*:\s*"?(\d[\d.,]*)"?/i);
-      if (m) {
-        var v = normalizeNumberToken(m[1]);
-        if (v !== null && v >= 100) price = Math.round(v);
-      }
-      at = src.indexOf(l.id, at + 1);
+/* Every occurrence of a known listing id, in document order. These are the
+ * boundaries that keep one listing's price from being read as another's. */
+function idOccurrences(src, knownIds) {
+  var out = [], re = /[0-9a-f]{24}/g, m;
+  while ((m = re.exec(src)) !== null) {
+    var v = m[0].toLowerCase();
+    if (!knownIds || knownIds[v]) out.push({ id: v, at: m.index });
+  }
+  return out;
+}
+
+/* The JSON object that encloses `at`, as [start, end). Scanning outward for the
+ * balanced braces is what makes price attribution exact: a listing's price is
+ * whatever sits inside ITS OWN object, never whatever happens to be nearby. */
+function enclosingObjectSpan(src, at, maxScan) {
+  maxScan = maxScan || 8000;
+  var depth = 0, start = -1, i, c;
+  for (i = at; i >= Math.max(0, at - maxScan); i--) {
+    c = src.charAt(i);
+    if (c === '}') depth++;
+    else if (c === '{') { if (depth === 0) { start = i; break; } depth--; }
+  }
+  if (start === -1) return null;
+  depth = 0;
+  var inStr = false, esc = false, limit = Math.min(src.length, start + maxScan * 2);
+  for (i = start; i < limit; i++) {
+    c = src.charAt(i);
+    if (esc) { esc = false; continue; }
+    if (c === '\\') { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return [start, i + 1]; }
+  }
+  return null;
+}
+
+var PRICE_KEY_RE = /"(?:price|cena|priceEur|price_eur|totalPrice)"\s*:\s*"?(\d[\d.,]*)"?/gi;
+
+function firstPriceIn(chunk) {
+  PRICE_KEY_RE.lastIndex = 0;
+  var m;
+  while ((m = PRICE_KEY_RE.exec(chunk)) !== null) {
+    var v = normalizeNumberToken(m[1]);
+    if (v !== null && v >= 100) return Math.round(v);
+  }
+  return null;
+}
+
+/* The price belonging to `id`. Preferred: the price inside the same JSON object
+ * as the id. Fallback: the region bounded by the neighbouring listing ids, so
+ * even then one listing's price can never be read as another's.
+ *
+ * A fixed window around the id — which is what this used to be — silently
+ * stole the neighbour's price whenever listing objects were packed together,
+ * shifting the price of every listing after the first. */
+function priceNearId(src, id, occ) {
+  var fallback = null;
+  for (var i = 0; i < occ.length; i++) {
+    if (occ[i].id !== id) continue;
+    var at = occ[i].at;
+
+    var span = enclosingObjectSpan(src, at);
+    if (span) {
+      var p = firstPriceIn(src.slice(span[0], span[1]));
+      if (p !== null) return p;
     }
-    return { id: l.id, url: l.url, price: price };
+
+    if (fallback === null) {
+      var lo = 0, hi = src.length, j, k;
+      for (j = i - 1; j >= 0; j--) if (occ[j].id !== id) { lo = occ[j].at; break; }
+      for (k = i + 1; k < occ.length; k++) if (occ[k].id !== id) { hi = occ[k].at; break; }
+      fallback = firstPriceIn(src.slice(at, Math.min(hi, at + 4000)));
+      if (fallback === null) fallback = firstPriceIn(src.slice(Math.max(lo, at - 4000), at));
+    }
+  }
+  return fallback;
+}
+
+/* Strategy B — hydration/embedded JSON, id-anchored. */
+function listFromJsonWindow(src, links) {
+  var known = Object.create(null);
+  links.forEach(function (l) { known[l.id] = true; });
+  var occ = idOccurrences(src, known);
+  return links.map(function (l) {
+    return { id: l.id, url: l.url, price: priceNearId(src, l.id, occ) };
   });
 }
 
@@ -218,12 +287,19 @@ function listFromDomSpans(html, links) {
 /* Runs all three, prefers the strategy with the best price coverage, and
  * back-fills gaps from the others. Returns diagnostics for the probe report. */
 function parseListPage(html) {
+  var src = html.replace(/\\"/g, '"').replace(/\\\//g, '/');
   var links = findListingLinks(html);
+  // Blank the ld+json blocks (keeping length, so offsets stay valid) before the
+  // payload scan, so the two strategies read genuinely independent sources and
+  // a disagreement between them is real evidence rather than an echo.
+  var payloadSrc = src.replace(/(<script[^>]+application\/ld\+json[^>]*>)([\s\S]*?)(<\/script>)/gi,
+    function (_, open, body, close) { return open + body.replace(/[^\n]/g, ' ') + close; });
   var strategies = {
     jsonld: listFromJsonLd(html),
-    json_window: listFromJsonWindow(html, links),
+    json_window: listFromJsonWindow(payloadSrc, links),
     dom_span: listFromDomSpans(html, links)
   };
+
   var coverage = {}, best = null;
   ['jsonld', 'json_window', 'dom_span'].forEach(function (name) {
     var rows = strategies[name];
@@ -232,11 +308,16 @@ function parseListPage(html) {
     if (!best || withPrice > coverage[best].with_price) best = name;
   });
 
+  // JSON-LD pairs a url with its own offers.price inside one object, so it is
+  // exact by construction and is always trusted first; the id-anchored payload
+  // scan fills in listings JSON-LD omits; the DOM scan is the last resort.
+  var PREFERENCE = ['jsonld', 'json_window', 'dom_span'];
+
   var merged = Object.create(null);
   (links.length ? links : strategies.jsonld).forEach(function (l) {
     merged[l.id] = { listing_id: l.id, url: l.url, price: null, price_source: null, price_on_request: false };
   });
-  [best, 'jsonld', 'json_window', 'dom_span'].forEach(function (name) {
+  PREFERENCE.forEach(function (name) {
     strategies[name].forEach(function (r) {
       if (!merged[r.id]) merged[r.id] = { listing_id: r.id, url: r.url, price: null, price_source: null, price_on_request: false };
       if (r.price_on_request) merged[r.id].price_on_request = true;
@@ -247,15 +328,37 @@ function parseListPage(html) {
     });
   });
 
+  // Two independent strategies disagreeing about the same listing means one of
+  // them is mis-attributing prices. Surfaced rather than silently resolved.
+  var byId = {};
+  PREFERENCE.forEach(function (name) {
+    strategies[name].forEach(function (r) { (byId[r.id] = byId[r.id] || {})[name] = r.price; });
+  });
+  var disagreements = [];
+  Object.keys(byId).forEach(function (k) {
+    var a = byId[k].jsonld, b = byId[k].json_window;
+    if (a != null && b != null && a !== b) disagreements.push({ listing_id: k, jsonld: a, json_window: b });
+  });
+
+  // Adjacent listings sharing a price is the fingerprint of the neighbour-theft bug.
   var listings = Object.keys(merged).map(function (k) { return merged[k]; });
+  var adjacentDupes = 0;
+  for (var i = 1; i < listings.length; i++) {
+    if (listings[i].price != null && listings[i].price === listings[i - 1].price) adjacentDupes++;
+  }
+
   return {
     listings: listings,
     diagnostics: {
       links_found: links.length,
       best_strategy: best,
+      preferred_order: PREFERENCE,
       coverage: coverage,
       priced: listings.filter(function (l) { return l.price != null; }).length,
-      unpriced: listings.filter(function (l) { return l.price == null; }).length
+      unpriced: listings.filter(function (l) { return l.price == null; }).length,
+      strategy_disagreements: disagreements.slice(0, 10),
+      strategy_disagreement_count: disagreements.length,
+      adjacent_duplicate_prices: adjacentDupes
     }
   };
 }
@@ -414,36 +517,64 @@ function inRanges(ranges, pos) {
   return false;
 }
 
-/* Ranked phone candidates. Explicit phone-carrying keys/attributes outrank a
- * bare number found loose in the markup; site chrome is demoted to last. */
-function extractPhones(html, excludeList) {
-  var excl = (excludeList || []).map(normalizePhone).filter(Boolean);
-  var chrome = chromeRanges(html);
+/* Numbers belonging to 4zida itself. Confirmed in Step 0: every listing page
+ * carries the site's own Organization block —
+ *   "telephone":"+381244155869","email":"info@4zida.rs" (Subotica office)
+ * — and without this it outranks the advertiser's real number on every row,
+ * turning the Phone column into one constant, useless value. */
+var SITE_PHONES = ['0244155869'];
+
+/* Ranked by how specific the key is to THIS listing. "phones" is the listing's
+ * own array of contact numbers; "telephone" is generic schema.org and in
+ * practice is the site switchboard, so it sits below everything listing-owned. */
+var PHONE_KEY_RANKS = {
+  phones: 5, phone: 8, phonenumber: 8, phone_number: 8, mobile: 8,
+  mobilni: 8, contactphone: 8, telefon: 10, telephone: 30
+};
+
+/* A number sitting inside a block that names the site is the site's own. */
+function looksSiteOwned(src, pos) {
+  return pos != null && /4zida/i.test(src.slice(Math.max(0, pos - 400), pos + 400));
+}
+
+/* Ranked phone candidates, best first. Listing-specific keys outrank generic
+ * ones; site chrome and 4zida's own contact block are pushed to the bottom;
+ * ties are broken by proximity to the listing this page is about. */
+function extractPhones(html, excludeList, anchorPos) {
+  var excl = SITE_PHONES.concat(excludeList || []).map(normalizePhone).filter(Boolean);
   var src = html.replace(/\\"/g, '"');
+  var chrome = chromeRanges(src);
   var found = [], seen = Object.create(null);
 
   function push(rawVal, source, rank, pos) {
     var n = normalizePhone(rawVal);
     if (!n || excl.indexOf(n) !== -1) return;
-    var effRank = rank + (pos != null && inRanges(chrome, pos) ? 100 : 0);
-    if (seen[n] != null) { if (effRank < found[seen[n]].rank) { found[seen[n]].rank = effRank; found[seen[n]].source = source; } return; }
+    var eff = rank;
+    if (pos != null && inRanges(chrome, pos)) eff += 100;
+    if (looksSiteOwned(src, pos)) eff += 200;
+    if (anchorPos != null && pos != null) eff += Math.min(1.5, Math.abs(pos - anchorPos) / 50000);
+    if (seen[n] != null) {
+      if (eff < found[seen[n]].rank) { found[seen[n]].rank = eff; found[seen[n]].source = source; }
+      return;
+    }
     seen[n] = found.length;
-    found.push({ phone: n, raw: String(rawVal).trim(), source: source, rank: effRank });
+    found.push({ phone: n, raw: String(rawVal).trim(), source: source, rank: eff });
   }
 
   var m;
-  // 1. explicit JSON keys in the hydration payload
-  var reKey = /"(phone|phoneNumber|phone_number|telefon|telephone|mobile|mobilni|contactPhone|phones)"\s*:\s*(\[[^\]]*\]|"[^"]{6,25}")/gi;
+  // 1. explicit phone-carrying keys in the embedded payload
+  var reKey = /"(phones|phone|phoneNumber|phone_number|telefon|telephone|mobile|mobilni|contactPhone)"\s*:\s*(\[[^\]]*\]|"[^"]{6,25}")/gi;
   while ((m = reKey.exec(src)) !== null) {
-    String(m[2]).replace(/"([^"]{6,25})"/g, function (_, v) { push(v, 'json:' + m[1], 10, m.index); return _; });
+    var key = m[1], at = m.index, rank = PHONE_KEY_RANKS[key.toLowerCase()] || 12;
+    String(m[2]).replace(/"([^"]{6,25})"/g, function (_, v) { push(v, 'json:' + key, rank, at); return _; });
   }
   // 2. tel: links and data-* attributes
   var reTel = /(?:href=["']tel:([^"']+)["']|data-(?:phone|telefon|tel)=["']([^"']+)["'])/gi;
   while ((m = reTel.exec(src)) !== null) push(m[1] || m[2], m[1] ? 'tel-href' : 'data-attr', 20, m.index);
   // 3. microdata
   var reMicro = /itemprop=["'](?:telephone|phone)["'][^>]*content=["']([^"']+)["']/gi;
-  while ((m = reMicro.exec(src)) !== null) push(m[1], 'microdata', 20, m.index);
-  // 4. loose numbers anywhere in the raw HTML (the documented fallback)
+  while ((m = reMicro.exec(src)) !== null) push(m[1], 'microdata', 25, m.index);
+  // 4. loose numbers anywhere in the raw HTML (documented fallback)
   PHONE_RE.lastIndex = 0;
   while ((m = PHONE_RE.exec(src)) !== null) push(m[0], 'raw-html', 50, m.index);
 
@@ -460,6 +591,8 @@ function plausibleName(s) {
   if (t.length < 2 || t.length > 80) return null;
   if (/^4\s*zida$/i.test(t) || /4zida/i.test(t)) return null;          // the site itself
   if (/^(null|undefined|true|false|\d+)$/i.test(t)) return null;
+  if (/^\$/.test(t)) return null;              // Next.js flight reference, e.g. "$7e"
+  if (/^[0-9a-f]{16,}$/i.test(t)) return null;  // bare hash/id
   if (!/[A-Za-zČĆŠĐŽčćšđž]/.test(t)) return null;
   if (/^(https?:|www\.|\/)/i.test(t)) return null;
   return t;
@@ -510,6 +643,18 @@ function extractAdvertiser(html, phoneRaw) {
 function parseDetail(html, url, opts) {
   opts = opts || {};
   var warnings = [];
+  var src = html.replace(/\\"/g, '"').replace(/\\\//g, '/');
+
+  // A detail page also carries "similar listings", each with its own price and
+  // sometimes its own contact. Anchor everything to the id in the URL so those
+  // neighbours can never be read as this listing's data.
+  var targetId = listingIdFromUrl(url);
+  var known = Object.create(null);
+  findListingLinks(html).forEach(function (l) { known[l.id] = true; });
+  if (targetId) known[targetId] = true;
+  var occ = idOccurrences(src, known);
+  var anchorPos = null;
+  for (var i = 0; i < occ.length; i++) if (occ[i].id === targetId) { anchorPos = occ[i].at; break; }
 
   var priceCands = [];
   extractJsonLd(html).forEach(function (root) {
@@ -524,9 +669,13 @@ function parseDetail(html, url, opts) {
       });
     });
   });
+  if (!priceCands.length && targetId) {
+    var anchored = priceNearId(src, targetId, occ);
+    if (anchored != null) priceCands.push({ value: anchored, source: 'json-key:id-anchored' });
+  }
   if (!priceCands.length) {
-    var mj = html.replace(/\\"/g, '"').match(/"(?:price|cena|priceEur|price_eur)"\s*:\s*"?(\d[\d.,]*)"?/i);
-    if (mj) { var vj = normalizeNumberToken(mj[1]); if (vj != null && vj >= 100) priceCands.push({ value: Math.round(vj), source: 'json-key' }); }
+    var mj = src.match(/"(?:price|cena|priceEur|price_eur)"\s*:\s*"?(\d[\d.,]*)"?/i);
+    if (mj) { var vj = normalizeNumberToken(mj[1]); if (vj != null && vj >= 100) priceCands.push({ value: Math.round(vj), source: 'json-key:first-match' }); }
   }
   if (!priceCands.length) {
     var vh = parsePriceEur(html);
@@ -535,11 +684,12 @@ function parseDetail(html, url, opts) {
   if (!priceCands.length && PRICE_ON_REQUEST.test(stripTags(html))) warnings.push('price_on_request');
   if (!priceCands.length) warnings.push('price_not_found');
 
-  var phones = extractPhones(html, opts.exclude_phones);
+  var phones = extractPhones(src, opts.exclude_phones, anchorPos);
   if (!phones.length) warnings.push('phone_not_found');
   else if (phones[0].source === 'raw-html') warnings.push('phone_from_raw_html_fallback');
+  else if (/telephone$/i.test(phones[0].source)) warnings.push('phone_from_generic_telephone_key');
 
-  var advs = extractAdvertiser(html, phones.length ? phones[0].raw : null);
+  var advs = extractAdvertiser(src, phones.length ? phones[0].raw : null);
   if (!advs.length) warnings.push('advertiser_not_found');
   else if (advs[0].source === 'dom-near-phone') warnings.push('advertiser_from_dom_fallback');
 
@@ -550,6 +700,7 @@ function parseDetail(html, url, opts) {
     phone: phones.length ? phones[0].phone : '',
     link: url,
     // diagnostics (not written to the Results tab)
+    listing_id: targetId,
     price_source: priceCands.length ? priceCands[0].source : null,
     phone_source: phones.length ? phones[0].source : null,
     phone_raw: phones.length ? phones[0].raw : '',
@@ -568,6 +719,7 @@ if (typeof module !== 'undefined' && module.exports) {
     detectPaginationTemplate: detectPaginationTemplate, buildPageUrl: buildPageUrl, detectBlock: detectBlock,
     normalizePhone: normalizePhone, extractPhones: extractPhones, extractAdvertiser: extractAdvertiser,
     parseDetail: parseDetail, ZIDA_ORIGIN: ZIDA_ORIGIN,
+    idOccurrences: idOccurrences, priceNearId: priceNearId, enclosingObjectSpan: enclosingObjectSpan, SITE_PHONES: SITE_PHONES,
     scrapingBeeUrl: scrapingBeeUrl, isFetchError: isFetchError, describeFetchError: describeFetchError
   };
 }

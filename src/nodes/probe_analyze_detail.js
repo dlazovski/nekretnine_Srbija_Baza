@@ -4,11 +4,12 @@
 const store = $getWorkflowStaticData('global');
 const t = $('Loop Probe B').first().json;
 const item = $input.first().json;
-const rec = { slug: t.slug, url: t.url, list_price: t.list_price };
+const rec = { slug: t.slug, rank: t.rank || 0, url: t.url, listing_id: t.listing_id, list_price: t.list_price };
+const key = t.slug + '#' + (t.rank || 0);
 
 if (isFetchError(item)) {
   rec.fetch_error = describeFetchError(item);
-  store.probe.detail[t.slug] = rec;
+  store.probe.detail[key] = rec;
   return [{ json: rec }];
 }
 
@@ -44,5 +45,11 @@ if (d.phone_raw) {
 }
 rec.listing_looks_like_agency = /agencij|agency|"agencyId"|RealEstateAgent|investitor/i.test(html);
 
-store.probe.detail[t.slug] = rec;
+// The decisive cross-check: does the price on the results page match the price
+// on the listing's own page? A mismatch means Stage 1 mis-attributes prices,
+// which would corrupt the 100k filter itself.
+rec.list_price_matches_detail = (rec.price_eur === '' || t.list_price == null)
+  ? null : Number(rec.price_eur) === Number(t.list_price);
+
+store.probe.detail[key] = rec;
 return [{ json: rec }];

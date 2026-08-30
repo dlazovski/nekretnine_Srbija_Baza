@@ -37,6 +37,7 @@ store.zida = {
   below_threshold: 0,
   qualifying: [],
   prev_ids: [],
+  page_signatures: {},
   strategies_used: {},
   list_fetch_errors: 0,
   detail_written: 0,

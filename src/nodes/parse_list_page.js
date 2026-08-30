@@ -63,9 +63,19 @@ s.strategies_used[parsed.diagnostics.best_strategy] = (s.strategies_used[parsed.
 
 // End of results: nothing on the page, or the site clamped us back to a page
 // we have already seen (both observed shapes of "past the last page").
-const repeated = ids.length > 0 && s.prev_ids.length === ids.length && ids.every(id => s.prev_ids.indexOf(id) !== -1);
 if (ids.length === 0) { s.stop_reason = 'end_of_results:empty_page_' + s.page; return emit({ done: true, stop_reason: s.stop_reason, listings_on_page: 0 }); }
-if (repeated) { s.stop_reason = 'end_of_results:page_repeated_at_' + s.page; return emit({ done: true, stop_reason: s.stop_reason }); }
+
+// Step 0 confirmed the site serves a real page for an out-of-range number
+// (?strana=9999 returned HTTP 200 with 20 listings), so it clamps rather than
+// emptying. Remembering every page's signature catches a clamp back to ANY
+// earlier page, not just the immediately preceding one.
+s.page_signatures = s.page_signatures || {};
+const signature = ids.slice().sort().join(',');
+if (s.page_signatures[signature] !== undefined) {
+  s.stop_reason = 'end_of_results:page_' + s.page + '_repeats_page_' + s.page_signatures[signature];
+  return emit({ done: true, stop_reason: s.stop_reason });
+}
+s.page_signatures[signature] = s.page;
 s.prev_ids = ids;
 
 let kept = 0;

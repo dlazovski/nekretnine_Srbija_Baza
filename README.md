@@ -15,34 +15,41 @@ workflows/4zida-serbia-scraper.json  ← the scraper
 
 ## ⚠️ Read this before you run anything
 
-**Step 0 (the mandatory live verification) has NOT been performed.** This build
-environment's egress proxy blocks both `www.4zida.rs` and `app.scrapingbee.com`
-at the CONNECT stage (HTTP 403, confirmed for curl and for the fetch tool), and
-no ScrapingBee API key is present here. Not one live request could be made, so
-every claim in the task brief about *where* things sit in the HTML remains
-unverified by me.
+**Step 0 has been run live (2026-08-30) and found two bugs that would have
+silently corrupted the output.** Both are fixed; see
+[docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) §0 for the evidence.
 
-Rather than hard-code a guessed selector, the workflow is built so Step 0 is
-something **you** run in about five minutes:
+* Every row was getting **4zida's own switchboard** (`+381244155869`) instead of
+  the advertiser's number.
+* Listings were taking their **neighbour's price**, which corrupted the 100k
+  filter itself, not just the Price column.
+
+Pagination (`?strana=N`), `render_js=false`, and the absence of bot protection
+are now **confirmed** on all five categories.
+
+**Re-run the probe before the first real scrape** to confirm the fixes on live
+pages — it now cross-checks each results-page price against the listing's own
+page, which is the check that catches a mis-attributed price:
 
 1. Import `workflows/4zida-step0-probe.json`, add your ScrapingBee credential,
-   run it. It performs exactly the Step 0 requests — page 1 of all five
-   categories, one detail page per category, and one deliberately out-of-range
-   page — and prints a structured report.
+   run it (~16 credits). It fetches page 1 of all five categories, **two** detail
+   pages per category, and one deliberately out-of-range page, then prints a
+   structured report.
 2. Read `actions_required` at the top of the report. Every line names a concrete
    thing to change and the function in `src/lib/parse.js` to change it in. An
    empty list means all assumptions held and the scraper is good to go.
 3. Fix anything flagged, re-run `python3 build/build.py`, re-import.
 
 The extractors are deliberately **multi-strategy**: each field is attempted via
-JSON-LD, then the embedded hydration/JSON payload, then a raw-HTML regex, and
-every row records which strategy actually won (`price_source`, `phone_source`,
-`advertiser_source` appear in the run's execution data). So there is a real
-chance it works untouched — but the probe is what turns that into knowledge.
+JSON-LD, then the embedded payload, then a raw-HTML regex, and every row records
+which strategy won (`price_source`, `phone_source`, `advertiser_source` appear
+in the run's execution data). Prices additionally come from two *independent*
+sources, and a disagreement between them is reported rather than resolved
+silently.
 
-The parsing logic itself **is** verified: 56 unit tests over synthetic fixtures
-plus 74 end-to-end assertions that execute the exact JavaScript shipped inside
-the workflow JSON. See [Development](#development).
+Verified by 153 assertions, including regression tests reproducing both live
+bugs from the payload shapes the probe reported. See
+[Development](#development).
 
 ---
 
@@ -208,7 +215,7 @@ tests/               unit tests, structural validation, workflow simulation
 
 ```bash
 python3 build/build.py   # regenerate both workflow JSON files
-npm test                 # 130 assertions across 4 suites
+npm test                 # 153 assertions across 4 suites
 ```
 
 `tests/simulate.js` is the important one: it pulls the JavaScript **out of the

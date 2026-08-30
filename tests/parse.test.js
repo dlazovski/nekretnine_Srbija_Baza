@@ -155,5 +155,95 @@ eq('err: surfaces http code, message and upstream cause',
 ok('err: never returns empty', A.describeFetchError({ error: {} }).length > 0);
 ok('err: handles a missing error object', A.describeFetchError({}).length > 0);
 
+/* ==========================================================================
+ * Regressions from the live Step 0 probe of 2026-08-30. Both bugs below were
+ * shipped and both were silent — the workflow produced plausible-looking rows.
+ * Fixtures mirror the real payload shapes the probe reported.
+ * ========================================================================== */
+
+/* --- BUG 1: a fixed window around a listing id stole the NEIGHBOUR's price.
+ * Live symptom: the first two listings shared a price in 4 of 5 categories. --- */
+const packed = (() => {
+  const ids = ['a'.repeat(23) + '1', 'b'.repeat(23) + '2', 'c'.repeat(23) + '3'];
+  const prices = [70300, 215000, 99000];
+  let links = '', payload = '[';
+  ids.forEach((x, i) => {
+    links += '<a href="/prodaja-stanova/novi-sad/dvosoban-stan/' + x + '">S' + i + '</a>';
+    payload += (i ? ',' : '') + '{"id":"' + x + '","title":"Stan ' + i +
+      '","description":"' + 'opis '.repeat(30) + '","price":' + prices[i] + ',"m2":' + (40 + i) + '}';
+  });
+  return { html: '<html><body><main>' + links + '</main><script>self.__next_f.push([1,"' +
+    payload + ']"])</script></body></html>', ids, prices };
+})();
+const pk = A.parseListPage(packed.html);
+const pkById = Object.fromEntries(pk.listings.map(l => [l.listing_id, l.price]));
+eq('packed payload: listing 1 price', pkById[packed.ids[0]], 70300);
+eq('packed payload: listing 2 keeps its OWN price, not its neighbour\'s', pkById[packed.ids[1]], 215000);
+eq('packed payload: listing 3 price', pkById[packed.ids[2]], 99000);
+eq('packed payload: no adjacent duplicates', pk.diagnostics.adjacent_duplicate_prices, 0);
+
+/* the id-anchored lookup used directly */
+{
+  const src = packed.html;
+  const known = Object.fromEntries(packed.ids.map(i => [i, true]));
+  const occ = A.idOccurrences(src, known);
+  eq('priceNearId picks the price inside the listing\'s own object',
+     packed.ids.map(i => A.priceNearId(src, i, occ)), packed.prices);
+}
+
+/* JSON-LD is exact, so it must win over the payload scan when they disagree */
+{
+  const id = 'd'.repeat(23) + '4';
+  const html = '<html><body><a href="/prodaja-kuca/nis/jednoetazna/' + id + '">K</a>' +
+    '<script type="application/ld+json">{"@type":"ItemList","itemListElement":[{"item":{"url":' +
+    '"https://www.4zida.rs/prodaja-kuca/nis/jednoetazna/' + id + '","offers":{"price":"333000","priceCurrency":"EUR"}}}]}</script>' +
+    '<script>{"id":"' + id + '","price":111000}</script></body></html>';
+  const r = A.parseListPage(html);
+  eq('jsonld wins over the payload scan', r.listings[0].price, 333000);
+  eq('jsonld is recorded as the source', r.listings[0].price_source, 'jsonld');
+  eq('the disagreement is reported, not hidden', r.diagnostics.strategy_disagreement_count, 1);
+}
+
+/* --- BUG 2: 4zida's own Organization telephone outranked the advertiser's
+ * number, so every row in every category got the same phone. --- */
+const siteOrg = '<script type="application/ld+json">{"@type":"Organization","name":"4zida",' +
+  '"address":{"@type":"PostalAddress","streetAddress":"Matije Korvina 17, 4. sprat",' +
+  '"postalCode":"24000","addressLocality":"Subotica","addressCountry":"RS"},' +
+  '"telephone":"+381244155869","email":"info@4zida.rs","foundingDate":"2015"}</script>';
+{
+  const id = 'e'.repeat(23) + '5';
+  const html = '<html><head>' + siteOrg + '</head><body>' + 'x'.repeat(2500) +
+    '<a href="/prodaja-stanova/vracar-beograd/trosoban-stan/' + id + '">S</a>' +
+    '<script>{"id":"' + id + '","price":215000,"fullName":"Nenad Dalmacija","phones":["+381658236112"]}</script>' +
+    '</body></html>';
+  const d = A.parseDetail(html, 'https://www.4zida.rs/prodaja-stanova/vracar-beograd/trosoban-stan/' + id);
+  eq('advertiser phone wins over the site switchboard', d.phone, '0658236112');
+  eq('phone source is the listing-owned key', d.phone_source, 'json:phones');
+  ok('the site number is not written at all', !d.all_phones.some(x => x.phone === '0244155869'), d.all_phones);
+  eq('advertiser name', d.advertiser_name, 'Nenad Dalmacija');
+  eq('price is id-anchored', d.price_eur, 215000);
+  eq('no warnings on a clean listing', d.warnings, []);
+}
+ok('the confirmed site number is excluded by default', A.SITE_PHONES.indexOf('0244155869') !== -1);
+
+/* a generic schema.org telephone still loses to a listing-owned key... */
+{
+  const html = '<html><body><script>{"telephone":"+381112223334","phones":["+381641112223"]}</script></body></html>';
+  eq('telephone key ranks below phones key', A.extractPhones(html)[0].phone, '0641112223');
+}
+/* ...but is still offered when it is the only candidate */
+{
+  const html = '<html><body><script>{"telephone":"+381641112223"}</script></body></html>';
+  eq('generic telephone used as a last resort', A.extractPhones(html)[0].phone, '0641112223');
+}
+
+/* --- BUG 3: Next.js flight references were accepted as advertiser names --- */
+{
+  const html = '<html><body><script>{"author":"$7e","fullName":"Marijana Milutinović"}</script></body></html>';
+  const advs = A.extractAdvertiser(html, null);
+  ok('flight refs like "$7e" are rejected as names', !advs.some(a => /^\$/.test(a.name)), advs);
+  eq('the real name is used', advs[0].name, 'Marijana Milutinović');
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

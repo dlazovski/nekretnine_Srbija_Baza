@@ -174,7 +174,18 @@ const clampServe = (url) => {
   return { body: (pages[Math.min(p, 3)] = pages[Math.min(p, 3)] || listPage(Math.min(p, 3), 12)), status: 200 };
 };
 const r3 = runWorkflow({}, clampServe);
-ok('stops when the site clamps to the last page', /page_repeated/.test(r3.summary.stop_reason), r3.summary.stop_reason);
+ok('stops when the site clamps to the last page', /repeats_page/.test(r3.summary.stop_reason), r3.summary.stop_reason);
+
+/* the site clamps out-of-range pages back to page 1, not to the last page */
+const clampToFirst = (url) => {
+  const m = url.match(/strana=(\d+)/); const p = m ? Number(m[1]) : 1;
+  const eff = p > 3 ? 1 : p;
+  return { body: (pages[eff] = pages[eff] || listPage(eff, 12)), status: 200 };
+};
+const r3b = runWorkflow({}, clampToFirst);
+ok('stops when an out-of-range page clamps back to page 1 (not just the previous page)',
+   /repeats_page_1/.test(r3b.summary.stop_reason), r3b.summary.stop_reason);
+ok('clamped run did not spin to the hard cap', r3b.summary.pages_fetched < 10, r3b.summary.pages_fetched);
 
 /* ---- bot block stops the run ---- */
 const r4 = runWorkflow({}, (url) => /strana=2/.test(url)

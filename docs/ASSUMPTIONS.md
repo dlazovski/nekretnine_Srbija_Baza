@@ -1,13 +1,72 @@
 # Assumptions about 4zida.rs HTML — spot-check list
 
-**None of these were verified against the live site during this build.** The
-egress proxy in the build environment blocked `www.4zida.rs` and
-`app.scrapingbee.com` (HTTP 403 on CONNECT), so zero live requests were made.
-`workflows/4zida-step0-probe.json` checks every item below automatically and
-names the ones that fail; this file is for manual spot-checking alongside it.
+**Status: Step 0 was run live on 2026-08-30** (11 requests, all HTTP 200, no
+blocks). Items below are marked **CONFIRMED** where the probe settled them and
+**ASSUMED** where it did not. Two assumptions failed and are documented at the
+top; both are fixed, and both are now covered by regression tests.
+
+Re-run `workflows/4zida-step0-probe.json` after any change to `src/lib/parse.js`
+— it now also cross-checks each results-page price against the listing's own
+page, which is what catches a mis-attributed price.
 
 The column **If wrong** tells you what actually breaks, so you can judge which
 of these are worth checking by hand before a full 5-category run.
+
+---
+
+## 0. What Step 0 found (2026-08-30)
+
+### CONFIRMED
+* **Pagination is `?strana=N`** — detected via `rel="next"` on all five categories.
+* **Out-of-range pages clamp** — `?strana=9999` returned HTTP 200 with 20 real
+  listings, not an empty page. End-of-results must therefore be detected by
+  repeated content, not by emptiness.
+* **`render_js` is not needed.** The page displays `062 43****` masked, and the
+  unmasked number is in the served HTML. Confirmed on all five categories.
+* **No bot protection encountered.** Pages are ~0.9–1.2 MB, HTTP 200.
+* **Prices are not in the visible HTML.** The DOM-text strategy found 0 prices in
+  every category; prices live in JSON-LD (20 per page) and in the Next.js flight
+  payload (all 20–26 per page). The DOM strategy is now a last resort only.
+* **20–26 listings per results page**, varying by category.
+
+### FAILED — found by the probe, fixed, regression-tested
+
+**F1. Every row got 4zida's own switchboard as the phone number.**
+All five categories returned `+381244155869`. Its context gives it away:
+`"telephone":"+381244155869","email":"info@4zida.rs"`, a Subotica address,
+`"foundingDate":"2015"` — the site's own Organization block, present on every
+listing page. The advertiser's real number was sitting in the listing's own
+`phones` array (`+381658236112`, `+381693422234`, …), distinct per listing.
+Both sources ranked equally, so document order decided, and the Organization
+block comes first.
+*Fix:* `phones` now outranks the generic schema.org `telephone` key; any number
+in a block mentioning 4zida is pushed to the bottom; the confirmed number is in
+`SITE_PHONES` and excluded outright.
+
+**F2. Listings were taking their neighbour's price.**
+In four of five categories the first two listings shared a price
+(70300/70300, 187000/187000, 1250000/1250000, 32000/32000). The fifth category
+was the only one where the exact JSON-LD strategy won, and its prices were all
+distinct. The cause: the payload scan searched a fixed ±1500-character window
+around each listing id and took the first price it saw — which, in a payload of
+packed listing objects, is the *previous* listing's price, shifting every
+listing after the first.
+*Fix:* the price now comes from inside the listing's **own JSON object**, found
+by balanced-brace scanning, never from a proximity window. JSON-LD, being exact
+by construction, is preferred where present, and the two strategies are now read
+from independent sources so a disagreement between them is real evidence.
+**This bug corrupted the 100k filter itself**, not just the Price column.
+
+**F3. `"$7e"` was accepted as an advertiser name.** Next.js flight payloads
+serialise references that way. Harmless here only because a real name outranked
+it. *Fix:* `$`-prefixed and bare-hash strings are rejected as names.
+
+### Why the probe reported "None — all Step 0 assumptions held"
+It checked whether a field was *found*, never whether the value was *right*.
+The report now also cross-checks results-page price against detail-page price
+for two listings per category, flags adjacent duplicate prices, flags a phone
+that repeats across unrelated listings, flags a phone taken from the generic
+`telephone` key, and flags disagreement between the two price strategies.
 
 ---
 
@@ -15,15 +74,15 @@ of these are worth checking by hand before a full 5-category run.
 
 | # | Assumption | If wrong |
 |---|---|---|
-| A1 | Search/listing pages are server-rendered with real prices in the HTML. | Stage 1 finds no prices; everything is skipped as unpriced. Probe reports `price_coverage_pct: 0`. |
-| A2 | Detail pages are server-rendered (not a JS shell). | Stage 2 returns blank fields for every listing. |
-| A3 | The **full, unmasked** phone is in the raw HTML despite the masked display. | `phone` is blank everywhere. Probe reports `render_js_needed_for_phone: true` — the fix is `render_js=true` on `Fetch Detail Page`, at ~10× the credit cost. |
+| A1 | Search/listing pages are server-rendered with real prices in the HTML. **CONFIRMED** — though in JSON payloads, not visible text. | Stage 1 finds no prices; everything is skipped as unpriced. Probe reports `price_coverage_pct: 0`. |
+| A2 | Detail pages are server-rendered (not a JS shell). **CONFIRMED.** | Stage 2 returns blank fields for every listing. |
+| A3 | The **full, unmasked** phone is in the raw HTML despite the masked display. **CONFIRMED on all 5 categories.** | `phone` is blank everywhere. Probe reports `render_js_needed_for_phone: true` — the fix is `render_js=true` on `Fetch Detail Page`, at ~10× the credit cost. |
 | A4 | No minimum-price URL filter exists. | (Closed question — not re-checked. Its absence is *why* Stage 1 exists.) |
 | A5 | The five category base URLs cover the full scope. | A category is silently missed. |
 
 ## B. Assumptions I made, that the brief did not settle
 
-### B1 — Listing links end in a 24-character hex id
+### B1 — Listing links end in a 24-character hex id  — **CONFIRMED**
 Every listing URL is assumed to look like
 `/prodaja-{kind}/{location}/{type}/{24-hex-id}`, e.g.
 `…/trosoban-stan/6a91d04359e6b8eb78023435` (the one example in the brief).
@@ -38,7 +97,7 @@ it survives styling changes and works identically in all five categories.
 * **Per-category risk:** low. The id shape is a database convention, unlikely
   to differ between apartments and garages — but the probe checks all five.
 
-### B2 — Price association: a card runs from one listing link to the next
+### B2 — Price association — **REWRITTEN after F2 above**
 When neither JSON-LD nor an embedded JSON payload carries the price, the price
 is read from the slice of HTML between one listing link and the next, falling
 back to a 1,200-character look-behind for layouts that print the price above
@@ -72,7 +131,7 @@ A listing with no numeric price is skipped at Stage 1, counted in
   request", it will be missed. That follows directly from the brief ("do not
   guess a price").
 
-### B5 — Pagination pattern is discoverable from page 1
+### B5 — Pagination pattern is discoverable from page 1 — **CONFIRMED (`?strana=N`)**
 Read from `<link rel="next">`, else from any pagination anchor pointing at the
 same category path; supports `?strana=N`, `?page=N`, `?p=N`, `/stranica/N`,
 `/strana/N`, `/page/N`. Falls back to `?strana=N` only if nothing is found.
@@ -82,13 +141,15 @@ same category path; supports `?strana=N`, `?page=N`, `?p=N`, `/stranica/N`,
   the run stops early on the repeated-ids check rather than looping forever.
   Check `Run Summary.pagination_style` — it says exactly what was used.
 
-### B6 — End of results looks like an empty page *or* a repeated page
+### B6 — End of results looks like an empty page *or* a repeated page — **CONFIRMED: 4zida clamps**
 Both are handled: zero listings found, or a page whose ids exactly repeat the
 previous page's (sites that clamp out-of-range pages to the last real one).
 
-* **If wrong:** the hard 5,000-page cap stops the run regardless.
+* Because `?strana=9999` returns a real page, every page's id-signature is
+  remembered for the run. A clamp back to page 1 — not just to the previous
+  page — ends pagination. The hard 5,000-page cap remains as a backstop.
 
-### B7 — The phone sits in a phone-specific key, attribute, or `tel:` link
+### B7 — The phone sits in a phone-specific key — **CONFIRMED (`phones` array), after F1**
 Tried in this order: JSON keys (`phone`, `phoneNumber`, `telefon`, `mobile`,
 `contactPhone`, …) → `tel:` hrefs and `data-phone`-style attributes →
 `itemprop="telephone"` → a loose Serbian-number regex over the raw HTML.
@@ -108,7 +169,7 @@ Tried in this order: JSON keys (`phone`, `phoneNumber`, `telefon`, `mobile`,
   that some listings carry several numbers. Only the highest-ranked candidate
   is written; the rest appear in the execution data as `all_phones`.
 
-### B8 — The advertiser name is in a name-ish JSON key or JSON-LD seller
+### B8 — The advertiser name is in a name-ish JSON key — **CONFIRMED (`fullName`, `author`, jsonld `Person`)**
 Tried: hydration keys (`advertiserName`, `agencyName`, `companyName`, `seller`,
 `owner`, `contactName`, `oglasivac`, `agencija`, …) → JSON-LD
 `seller`/`provider`/`author`/`agent` or a `RealEstateAgent`/`Person` object →

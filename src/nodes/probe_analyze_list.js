@@ -33,6 +33,9 @@ rec.price_strategy_coverage = parsed.diagnostics.coverage;
 rec.priced = parsed.diagnostics.priced;
 rec.unpriced = parsed.diagnostics.unpriced;
 rec.price_coverage_pct = rec.links_found ? Math.round(100 * rec.priced / rec.links_found) : 0;
+rec.strategy_disagreement_count = parsed.diagnostics.strategy_disagreement_count;
+rec.strategy_disagreements = parsed.diagnostics.strategy_disagreements;
+rec.adjacent_duplicate_prices = parsed.diagnostics.adjacent_duplicate_prices;
 rec.sample_listings = parsed.listings.slice(0, 3).map(l => ({
   id: l.listing_id, url: l.url, price: l.price, price_source: l.price_source, on_request: l.price_on_request
 }));

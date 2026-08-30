@@ -29,8 +29,11 @@ ok('out-of-range probe present', targets.some(t => t.json.kind === 'list_far'));
 const CHROME = '<html lang="sr"><head><title>4zida.rs</title><link rel="next" href="/prodaja-stanova?strana=2"></head>';
 const BULK = '<div>' + 'sadrzaj '.repeat(400) + '</div>';
 const lid = 'a1b2c3d4e5f60718293a4b5c';
-const listHtml = CHROME + BULK + '<body><main><article><a href="/prodaja-stanova/vracar-beograd/trosoban-stan/' +
-  lid + '">Stan</a><p>245.000 €</p><p>2.900 €/m²</p></article></main></body></html>';
+const lid2 = 'b1b2c3d4e5f60718293a4b5d';
+const listHtml = CHROME + BULK + '<body><main>' +
+  '<article><a href="/prodaja-stanova/vracar-beograd/trosoban-stan/' + lid + '">Stan</a><p>245.000 €</p><p>2.900 €/m²</p></article>' +
+  '<article><a href="/prodaja-stanova/zvezdara-beograd/dvosoban-stan/' + lid2 + '">Stan2</a><p>310.000 €</p></article>' +
+  '</main></body></html>';
 
 for (const t of targets) {
   out['Loop Probe A'] = [t];
@@ -44,17 +47,26 @@ ok('probe reports price coverage', first.price_coverage_pct === 100, first.price
 ok('probe reports end-of-results signature', !!store.probe.list['list_far:prodaja-stanova'].end_of_results_signature);
 
 const dTargets = run('Build Detail Probe Targets', []);
-ok('one detail probe per category', dTargets.length === 5, dTargets.length);
+ok('two detail probes per category (the 2nd is what catches a shifted price)',
+   dTargets.length === 10, dTargets.length);
 
-const detailHtml = CHROME + BULK + '<body><span>062 43****</span><script>window.__NUXT__={ad:{"advertiserName":"Milan Petrović","phone":"+381 62 4312345","price":245000}}</script></body></html>';
+let phoneSeq = 0;
+const phoneMap = {};
+const phoneFor = (slug, rank) => (phoneMap[slug + rank] = phoneMap[slug + rank] || ('+3816' + String(10000000 + (phoneSeq++))));
+const detailHtml = (id, price, phone) => CHROME + BULK + '<body><span>062 43****</span>' +
+  '<script>{"id":"' + id + '","advertiserName":"Milan Petrović","phones":["' + phone + '"],"price":' + price + '}</script></body></html>';
 for (const t of dTargets) {
   out['Loop Probe B'] = [t];
-  run('Analyze Detail Probe', [{ json: { body: detailHtml, statusCode: 200 } }]);
+  run('Analyze Detail Probe', [{ json: { body: detailHtml(t.json.listing_id, t.json.list_price, phoneFor(t.json.slug, t.json.rank || 0)), statusCode: 200 } }]);
 }
 const rep = run('Build Step 0 Report', [])[0].json;
 ok('report covers all 5 categories', rep.per_category.length === 5, rep.per_category.length);
-ok('report counts the credits spent', rep.scrapingbee_requests_used === 11, rep.scrapingbee_requests_used);
+ok('report counts the credits spent', rep.scrapingbee_requests_used === 16, rep.scrapingbee_requests_used);
+ok('report cross-checks list price against detail price',
+   rep.per_category[0].detail_probes.every(x => x.list_price_matches_detail === true),
+   rep.per_category[0].detail_probes);
 ok('report confirms phone without render_js', rep.per_category[0].detail_probe.phone_available_without_render_js === true);
+ok('report exposes per-category strategy disagreements field', rep.per_category[0].strategy_disagreements === 0, rep.per_category[0].strategy_disagreements);
 ok('report shows the masked display form was present', rep.per_category[0].detail_probe.phone_masked_form_on_page === true);
 ok('report includes surrounding HTML for the phone', /advertiserName|phone/.test(rep.per_category[0].detail_probe.phone_context || ''));
 ok('clean probe reports no actions', rep.actions_required.length === 1 && /None/.test(rep.actions_required[0]), rep.actions_required);
