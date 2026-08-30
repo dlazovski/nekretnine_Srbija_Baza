@@ -26,6 +26,7 @@ store.zida = {
   resume_after_listing_id: String(cfg.resume_after_listing_id || '').trim().toLowerCase(),
   max_pages: Math.max(0, Number(cfg.max_pages) || 0),
   exclude_phones: String(cfg.exclude_phones || '').split(',').map(s => s.trim()).filter(Boolean),
+  sb: { premium_proxy: cfg.premium_proxy, country_code: cfg.country_code, render_js: false },
   page_template: null,
   pagination_style: 'not-detected-yet',
   calibrated: false,
@@ -47,4 +48,5 @@ store.zida = {
 
 // Always fetch page 1 first, even when resuming: page 1 is what tells us the
 // real pagination pattern, so a resume jump lands on the right URL.
-return [{ json: { page: 1, next_url: base, done: false, blocked: false, category: store.zida.category } }];
+return [{ json: { page: 1, next_url: base, sb_url: scrapingBeeUrl(base, store.zida.sb),
+                  done: false, blocked: false, category: store.zida.category } }];

@@ -32,6 +32,7 @@ return out.map(o => ({ json: {
   _no_listings: false,
   listing_id: o.listing_id,
   url: o.url,
+  sb_url: scrapingBeeUrl(o.url, s.sb),
   list_price: o.list_price,
   list_price_source: o.price_source,
   category: s.category

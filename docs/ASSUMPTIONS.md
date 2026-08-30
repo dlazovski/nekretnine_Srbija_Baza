@@ -151,7 +151,14 @@ If the two disagree the detail value is written and the discrepancy is recorded
 in `price_mismatch` in the execution data. The row is not failed. Frequent
 mismatches would mean the Stage 1 card slicing (B2) is misattributing prices.
 
-### B12 — Static data survives the execution
+### B12 — ScrapingBee parameter combinations
+`country_code` is sent **only** when `premium_proxy` is on, because ScrapingBee
+rejects the pair otherwise with HTTP 400 — which fails every request in the run.
+Optional parameters are omitted entirely rather than sent empty. The endpoint
+URL is built by `scrapingBeeUrl()` in `src/lib/parse.js`; the API key is
+appended by the n8n credential and never appears in the URL the workflow builds.
+
+### B13 — Static data survives the execution
 Loop state and counters live in `$getWorkflowStaticData('global')`, reset at the
 start of every run by `Init Pager`. Durable progress goes to the `Checkpoint`
 tab in Google Sheets, not to static data — so resumability doesn't depend on

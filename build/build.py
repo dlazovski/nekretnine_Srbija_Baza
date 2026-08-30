@@ -53,19 +53,16 @@ def ifnode(name, pos, conditions):
         "looseTypeValidation": True, "options": {}})
 
 def scrapingbee(name, pos, url_expr, notes):
-    """ScrapingBee GET. render_js stays false: the unmasked phone is in the
-    server-rendered HTML, so JS rendering would only cost ~10x the credits."""
+    """ScrapingBee GET. The whole endpoint URL is built in code (scrapingBeeUrl)
+    so optional params are omitted rather than sent empty -- ScrapingBee rejects
+    country_code unless a premium proxy is on. The credential appends api_key.
+    render_js stays false: the unmasked phone is in the server-rendered HTML, so
+    JS rendering would only cost ~10x the credits."""
     return node(name, "n8n-nodes-base.httpRequest", 4.2, pos, {
-        "url": "https://app.scrapingbee.com/api/v1/",
+        "url": url_expr,
         "authentication": "genericCredentialType",
         "genericAuthType": "httpQueryAuth",
-        "sendQuery": True,
-        "queryParameters": {"parameters": [
-            {"name": "url", "value": url_expr},
-            {"name": "render_js", "value": "false"},
-            {"name": "premium_proxy", "value": "={{ $('Config').first().json.premium_proxy }}"},
-            {"name": "country_code", "value": "={{ $('Config').first().json.country_code }}"},
-        ]},
+        "sendQuery": False,
         "options": {"response": {"response": {"fullResponse": True, "responseFormat": "text"}},
                     "timeout": 120000}},
         credentials={"httpQueryAuth": {"id": "REPLACE_WITH_YOUR_CREDENTIAL", "name": "ScrapingBee API key (query auth)"}},
@@ -164,7 +161,7 @@ main_nodes = [
          notes="One-time run. Not scheduled by design."),
     setnode("Config", [-60, 300], CONFIG_FIELDS),
     code("Init Pager", [140, 300], "init_pager.js"),
-    scrapingbee("Fetch List Page", [340, 300], "={{ $json.next_url }}",
+    scrapingbee("Fetch List Page", [340, 300], "={{ $json.sb_url }}",
                 "Stage 1 source. Retries 3x/5s; a final failure continues as an error item."),
     code("Parse List Page", [540, 300], "parse_list_page.js"),
     ifnode("Blocked?", [740, 300], [cond("={{ $json.blocked }}", "boolean", "true", single=True)]),
@@ -181,7 +178,7 @@ main_nodes = [
     node("Wait 2-3s", "n8n-nodes-base.wait", 1.1, [1780, 660],
          {"amount": "={{ $('Config').first().json.delay_seconds }}", "unit": "seconds"},
          webhookId=uid("waitwebhook"), notes="Politeness delay before every detail request."),
-    scrapingbee("Fetch Detail Page", [1980, 660], "={{ $('Loop Over Listings').first().json.url }}",
+    scrapingbee("Fetch Detail Page", [1980, 660], "={{ $('Loop Over Listings').first().json.sb_url }}",
                 "Stage 2. Only reached for listings already priced above the threshold."),
     code("Extract 4 Fields", [2180, 660], "extract_detail.js"),
     ifnode("Detail Blocked?", [2380, 660], [cond("={{ $json.blocked }}", "boolean", "true", single=True)]),
@@ -265,15 +262,7 @@ PROBE_CONFIG = [
     {"name": "country_code", "value": "rs"},
 ]
 
-def probe_sb(name, pos, url_expr, notes):
-    n = scrapingbee(name, pos, url_expr, notes)
-    n["parameters"]["queryParameters"]["parameters"] = [
-        {"name": "url", "value": url_expr},
-        {"name": "render_js", "value": "false"},
-        {"name": "premium_proxy", "value": "={{ $('Probe Config').first().json.premium_proxy }}"},
-        {"name": "country_code", "value": "={{ $('Probe Config').first().json.country_code }}"},
-    ]
-    return n
+probe_sb = scrapingbee
 
 probe_nodes = [
     node("Run Step 0 Probe", "n8n-nodes-base.manualTrigger", 1, [-260, 300], {},
@@ -285,16 +274,18 @@ probe_nodes = [
     node("Wait A", "n8n-nodes-base.wait", 1.1, [540, 420],
          {"amount": "={{ $('Probe Config').first().json.delay_seconds }}", "unit": "seconds"},
          webhookId=uid("waitA")),
-    probe_sb("Fetch List Page (Probe)", [740, 420], "={{ $('Loop Probe A').first().json.url }}",
+    probe_sb("Fetch List Page (Probe)", [740, 420], "={{ $('Loop Probe A').first().json.sb_url }}",
              "Plain GET, no render_js - the Step 0 assumption under test."),
     code("Analyze List Probe", [940, 420], "probe_analyze_list.js"),
     code("Build Detail Probe Targets", [540, 180], "probe_detail_targets.js"),
-    node("Loop Probe B", "n8n-nodes-base.splitInBatches", 3, [740, 180],
+    ifnode("Any Listings To Probe?", [640, 180],
+           [cond("={{ $json._none }}", "boolean", "false", single=True)]),
+    node("Loop Probe B", "n8n-nodes-base.splitInBatches", 3, [840, 180],
          {"batchSize": 1, "options": {"reset": False}}, notes="One detail page per category."),
     node("Wait B", "n8n-nodes-base.wait", 1.1, [940, 60],
          {"amount": "={{ $('Probe Config').first().json.delay_seconds }}", "unit": "seconds"},
          webhookId=uid("waitB")),
-    probe_sb("Fetch Detail Page (Probe)", [1140, 60], "={{ $('Loop Probe B').first().json.url }}",
+    probe_sb("Fetch Detail Page (Probe)", [1140, 60], "={{ $('Loop Probe B').first().json.sb_url }}",
              "Locates the unmasked phone and the advertiser name in the raw HTML."),
     code("Analyze Detail Probe", [1340, 60], "probe_analyze_detail.js"),
     code("Build Step 0 Report", [1140, 300], "probe_report.js"),
@@ -311,7 +302,9 @@ probe_conns = conn([
     ("Wait A", 0, "Fetch List Page (Probe)", 0),
     ("Fetch List Page (Probe)", 0, "Analyze List Probe", 0),
     ("Analyze List Probe", 0, "Loop Probe A", 0),
-    ("Build Detail Probe Targets", 0, "Loop Probe B", 0),
+    ("Build Detail Probe Targets", 0, "Any Listings To Probe?", 0),
+    ("Any Listings To Probe?", 0, "Loop Probe B", 0),
+    ("Any Listings To Probe?", 1, "Build Step 0 Report", 0),
     ("Loop Probe B", 0, "Build Step 0 Report", 0),
     ("Loop Probe B", 1, "Wait B", 0),
     ("Wait B", 0, "Fetch Detail Page (Probe)", 0),

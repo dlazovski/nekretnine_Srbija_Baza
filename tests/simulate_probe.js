@@ -59,6 +59,36 @@ ok('report shows the masked display form was present', rep.per_category[0].detai
 ok('report includes surrounding HTML for the phone', /advertiserName|phone/.test(rep.per_category[0].detail_probe.phone_context || ''));
 ok('clean probe reports no actions', rep.actions_required.length === 1 && /None/.test(rep.actions_required[0]), rep.actions_required);
 
+ok('probe targets carry a prebuilt ScrapingBee url', targets.every(t => /app\.scrapingbee\.com/.test(t.json.sb_url)), targets[0].json);
+ok('probe url omits country_code when premium proxy is off',
+   targets.every(t => t.json.sb_url.indexOf('country_code') === -1), targets[0].json.sb_url);
+
+/* THE REGRESSION THAT SHIPPED: when every request fails, the report must say so
+ * loudly instead of reporting undefined fields as findings about the site. */
+(function () {
+  const saved = store.probe;
+  Object.keys(store).forEach(k => delete store[k]);
+  out['Probe Config'] = [{ json: cfg }];
+  const tg = run('Build Probe Targets', out['Probe Config']);
+  for (const t of tg) {
+    out['Loop Probe A'] = [t];
+    run('Analyze List Probe', [{ json: { error: { httpCode: '400', message: 'Bad request', cause: { error: 'country_code requires premium_proxy' } } } }]);
+  }
+  const d = run('Build Detail Probe Targets', []);
+  ok('no detail targets when every list request failed', d.length === 1 && d[0].json._none === true, d);
+  const rep = run('Build Step 0 Report', [])[0].json;
+  ok('headline says every request failed', /EVERY REQUEST FAILED/.test(rep.STEP_0_REPORT), rep.STEP_0_REPORT);
+  ok('failed requests are counted', rep.requests_failed === 6 && rep.scrapingbee_requests_used === 0,
+     [rep.requests_failed, rep.scrapingbee_requests_used]);
+  ok('every action names the real failure', rep.actions_required.every(a => /REQUEST FAILED/.test(a)), rep.actions_required);
+  ok('the upstream complaint is quoted', rep.actions_required.some(a => /country_code requires premium_proxy/.test(a)));
+  ok('no misleading pagination/advertiser findings',
+     !rep.actions_required.some(a => /Pagination pattern NOT detected|Advertiser name not found/.test(a)), rep.actions_required);
+  ok('per_category marks the categories unprobed',
+     rep.per_category.every(c => c.REQUEST_FAILED), rep.per_category[0]);
+  store.probe = saved;
+})();
+
 /* a failing probe must produce actionable instructions, not silence */
 const store2 = {}, out2 = {};
 (function () {

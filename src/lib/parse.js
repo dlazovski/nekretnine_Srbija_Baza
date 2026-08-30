@@ -298,6 +298,53 @@ function buildPageUrl(template, baseUrl, page) {
   return baseUrl + (baseUrl.indexOf('?') === -1 ? '?' : '&') + 'strana=' + page;  // documented fallback
 }
 
+/* --------------------------------------------------- ScrapingBee request ---*/
+
+/* Builds the ScrapingBee endpoint URL. Optional parameters are OMITTED rather
+ * than sent empty, because ScrapingBee rejects some combinations outright:
+ * country_code is only accepted alongside a premium/stealth proxy, so sending
+ * country_code=rs with premium_proxy=false makes EVERY request fail. The
+ * api_key is appended by the n8n credential, never built in here. */
+function scrapingBeeUrl(targetUrl, cfg) {
+  cfg = cfg || {};
+  var renderJs = cfg.render_js === true || String(cfg.render_js).toLowerCase() === 'true';
+  var premium = cfg.premium_proxy === true || String(cfg.premium_proxy).toLowerCase() === 'true';
+  var qs = ['url=' + encodeURIComponent(targetUrl), 'render_js=' + (renderJs ? 'true' : 'false')];
+  if (premium) {
+    qs.push('premium_proxy=true');
+    var cc = String(cfg.country_code || '').trim();
+    if (cc) qs.push('country_code=' + encodeURIComponent(cc));
+  }
+  return 'https://app.scrapingbee.com/api/v1/?' + qs.join('&');
+}
+
+/* The HTTP nodes continue on failure, so a request that exhausted its retries
+ * arrives as an item carrying `error` instead of `body`. */
+function isFetchError(item) {
+  return !!item && item.error !== undefined && item.body === undefined && item.data === undefined;
+}
+
+/* Squeezes every readable detail out of an n8n error item. The terse
+ * `error.message` alone hides the upstream service's actual complaint, which
+ * is exactly the thing worth reporting. */
+function describeFetchError(item) {
+  var e = item && item.error;
+  if (e === undefined || e === null) return 'unknown fetch error';
+  if (typeof e === 'string') return e.slice(0, 500);
+  var parts = [];
+  if (e.httpCode || e.status) parts.push('HTTP ' + (e.httpCode || e.status));
+  if (e.message) parts.push(String(e.message));
+  if (e.description && String(e.description) !== String(e.message)) parts.push(String(e.description));
+  var c = e.cause;
+  if (c) {
+    if (typeof c === 'string') parts.push(c);
+    else if (c.message) parts.push(String(c.message));
+    else { try { parts.push(JSON.stringify(c)); } catch (x) { /* not serialisable */ } }
+  }
+  if (!parts.length) { try { parts.push(JSON.stringify(e)); } catch (x) { parts.push(String(e)); } }
+  return parts.join(' | ').slice(0, 500);
+}
+
 /* ------------------------------------------------- bot / block detection ---*/
 
 /* Distinguishes "we are blocked" from "we parsed nothing". The two need very
@@ -520,6 +567,7 @@ if (typeof module !== 'undefined' && module.exports) {
     findListingLinks: findListingLinks, listingIdFromUrl: listingIdFromUrl, parseListPage: parseListPage,
     detectPaginationTemplate: detectPaginationTemplate, buildPageUrl: buildPageUrl, detectBlock: detectBlock,
     normalizePhone: normalizePhone, extractPhones: extractPhones, extractAdvertiser: extractAdvertiser,
-    parseDetail: parseDetail, ZIDA_ORIGIN: ZIDA_ORIGIN
+    parseDetail: parseDetail, ZIDA_ORIGIN: ZIDA_ORIGIN,
+    scrapingBeeUrl: scrapingBeeUrl, isFetchError: isFetchError, describeFetchError: describeFetchError
   };
 }

@@ -7,8 +7,8 @@ const item = $input.first().json;
 
 const rec = { slug: t.slug, kind: t.kind, url: t.url };
 
-if (item.error !== undefined && item.body === undefined) {
-  rec.fetch_error = String((item.error && item.error.message) || item.error).slice(0, 300);
+if (isFetchError(item)) {
+  rec.fetch_error = describeFetchError(item);
   store.probe.list[t.kind + ':' + t.slug] = rec;
   return [{ json: rec }];
 }

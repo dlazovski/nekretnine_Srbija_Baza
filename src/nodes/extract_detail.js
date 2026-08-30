@@ -14,10 +14,10 @@ const base = {
   list_price: src.list_price
 };
 
-if (item.error !== undefined && item.body === undefined) {
+if (isFetchError(item)) {
   return [{ json: Object.assign({}, base, {
     status: 'error', blocked: false,
-    error_message: 'fetch failed after retries: ' + String((item.error && item.error.message) || item.error).slice(0, 300)
+    error_message: 'fetch failed after retries: ' + describeFetchError(item)
   }) }];
 }
 

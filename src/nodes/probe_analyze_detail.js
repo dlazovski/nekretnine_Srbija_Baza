@@ -6,8 +6,8 @@ const t = $('Loop Probe B').first().json;
 const item = $input.first().json;
 const rec = { slug: t.slug, url: t.url, list_price: t.list_price };
 
-if (item.error !== undefined && item.body === undefined) {
-  rec.fetch_error = String((item.error && item.error.message) || item.error).slice(0, 300);
+if (isFetchError(item)) {
+  rec.fetch_error = describeFetchError(item);
   store.probe.detail[t.slug] = rec;
   return [{ json: rec }];
 }

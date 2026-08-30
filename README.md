@@ -41,7 +41,7 @@ every row records which strategy actually won (`price_source`, `phone_source`,
 chance it works untouched — but the probe is what turns that into knowledge.
 
 The parsing logic itself **is** verified: 56 unit tests over synthetic fixtures
-plus 51 end-to-end assertions that execute the exact JavaScript shipped inside
+plus 74 end-to-end assertions that execute the exact JavaScript shipped inside
 the workflow JSON. See [Development](#development).
 
 ---
@@ -102,7 +102,7 @@ healthy `stage1_listings_scanned` with everything filtered out at Stage 1.
 | `resume_after_listing_id` | *(blank)* | See [Resuming](#resuming-an-interrupted-run). |
 | `exclude_phones` | *(blank)* | Comma-separated numbers to never treat as an advertiser's — put 4zida's own support number here if the probe shows it being picked up. |
 | `premium_proxy` | `false` | Flip to `true` if you get blocked. Costs more credits. |
-| `country_code` | `rs` | ScrapingBee exit country. |
+| `country_code` | `rs` | ScrapingBee exit country. **Only sent when `premium_proxy` is `true`** — ScrapingBee rejects the request outright if a country is requested without a premium proxy, so the workflow omits it rather than sending an invalid pair. |
 
 ---
 
@@ -174,6 +174,26 @@ The Step 0 probe checks all of them automatically.
 
 ---
 
+## If requests fail
+
+The probe report leads with a verdict. If it says **`EVERY REQUEST FAILED`**,
+nothing in the rest of that report says anything about the site — the
+`actions_required` lines will quote ScrapingBee's actual complaint. The usual
+causes, in order:
+
+1. **Credential missing or misnamed.** It must be a *Query Auth* credential
+   with **Name** exactly `api_key`. A wrong name gives HTTP 401.
+2. **Out of credits.** ScrapingBee returns a JSON error body; the report quotes it.
+3. **`country_code` without `premium_proxy`.** An invalid pair that ScrapingBee
+   rejects with HTTP 400. The workflow no longer constructs it, but if you set
+   the params by hand, keep them consistent.
+
+The same applies mid-run in the scraper: a failed list-page fetch stops
+pagination with `list_fetch_failed_page_N` and the upstream error text in
+`Run Summary.stop_reason`, rather than looking like a clean end of results.
+
+---
+
 ## Development
 
 The parsing library lives in one file and is injected into every Code node at
@@ -188,7 +208,7 @@ tests/               unit tests, structural validation, workflow simulation
 
 ```bash
 python3 build/build.py   # regenerate both workflow JSON files
-npm test                 # 107 assertions across 4 suites
+npm test                 # 130 assertions across 4 suites
 ```
 
 `tests/simulate.js` is the important one: it pulls the JavaScript **out of the

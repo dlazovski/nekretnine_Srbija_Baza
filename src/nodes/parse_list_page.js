@@ -14,6 +14,7 @@ function emit(extra) {
     qualifying_so_far: s.qualifying.length,
     category: s.category,
     next_url: s.next_url_out || s.base_url,
+    sb_url: scrapingBeeUrl(s.next_url_out || s.base_url, s.sb),
     done: false,
     blocked: false
   }, extra) }];
@@ -21,9 +22,9 @@ function emit(extra) {
 
 // The HTTP node is set to continue on failure, so a request that failed all
 // 3 retries arrives here as an error item rather than aborting the run.
-if (item.error !== undefined && item.body === undefined) {
+if (isFetchError(item)) {
   s.list_fetch_errors++;
-  s.stop_reason = 'list_fetch_failed_page_' + s.page + ': ' + String(item.error && item.error.message || item.error).slice(0, 200);
+  s.stop_reason = 'list_fetch_failed_page_' + s.page + ': ' + describeFetchError(item);
   return emit({ done: true, stop_reason: s.stop_reason });
 }
 
@@ -51,7 +52,8 @@ if (!s.calibrated) {
   if (s.resume_from_page > 1) {
     s.page = s.resume_from_page;
     s.next_url_out = buildPageUrl(s.page_template, s.base_url, s.page);
-    return emit({ done: false, note: 'calibrated, resuming at page ' + s.page, next_url: s.next_url_out });
+    return emit({ done: false, note: 'calibrated, resuming at page ' + s.page,
+                  next_url: s.next_url_out, sb_url: scrapingBeeUrl(s.next_url_out, s.sb) });
   }
 }
 
@@ -88,6 +90,7 @@ s.next_url_out = buildPageUrl(s.page_template, s.base_url, s.page);
 return emit({
   done: false,
   next_url: s.next_url_out,
+  sb_url: scrapingBeeUrl(s.next_url_out, s.sb),
   listings_on_page: parsed.diagnostics.links_found,
   priced_on_page: parsed.diagnostics.priced,
   kept_on_page: kept,

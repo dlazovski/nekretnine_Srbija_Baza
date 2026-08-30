@@ -131,5 +131,29 @@ ok('block: normal page is not blocked', !A.detectBlock(listHtml, 200).blocked);
 ok('block: empty-but-valid page is a parse miss, not a block',
    !A.detectBlock('<html><body><div id="app">4zida — nema rezultata za vašu pretragu.</div>' + 'x'.repeat(3000) + '</body></html>', 200).blocked);
 
+/* ---- ScrapingBee URL building ---- */
+const u1 = A.scrapingBeeUrl('https://www.4zida.rs/prodaja-stanova?strana=2', { premium_proxy: 'false', country_code: 'rs' });
+ok('sb: omits country_code without premium proxy (ScrapingBee rejects that pair)', u1.indexOf('country_code') === -1, u1);
+ok('sb: omits premium_proxy when off', u1.indexOf('premium_proxy') === -1, u1);
+ok('sb: target url is encoded', u1.indexOf('url=https%3A%2F%2Fwww.4zida.rs%2Fprodaja-stanova%3Fstrana%3D2') !== -1, u1);
+ok('sb: render_js false by default', /render_js=false/.test(u1), u1);
+ok('sb: never embeds an api key', !/api_key/.test(u1), u1);
+const u2 = A.scrapingBeeUrl('https://x/y', { premium_proxy: 'true', country_code: 'rs' });
+ok('sb: sends country_code with premium proxy', /premium_proxy=true&country_code=rs/.test(u2), u2);
+const u3 = A.scrapingBeeUrl('https://x/y', { premium_proxy: true, country_code: '  ' });
+ok('sb: blank country_code omitted even with premium', u3.indexOf('country_code') === -1, u3);
+const u4 = A.scrapingBeeUrl('https://x/y', { render_js: 'true' });
+ok('sb: render_js can be turned on', /render_js=true/.test(u4), u4);
+
+/* ---- fetch-error detection and description ---- */
+ok('err: error item detected', A.isFetchError({ error: { message: 'boom' } }));
+ok('err: good response is not an error item', !A.isFetchError({ body: '<html>', statusCode: 200 }));
+ok('err: empty body is not an error item', !A.isFetchError({ body: '', statusCode: 200 }));
+eq('err: surfaces http code, message and upstream cause',
+   A.describeFetchError({ error: { httpCode: '400', message: 'Bad request', cause: { error: 'country_code needs premium_proxy' } } }),
+   'HTTP 400 | Bad request | {"error":"country_code needs premium_proxy"}');
+ok('err: never returns empty', A.describeFetchError({ error: {} }).length > 0);
+ok('err: handles a missing error object', A.describeFetchError({}).length > 0);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
