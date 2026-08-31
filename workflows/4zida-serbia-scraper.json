@@ -450,7 +450,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "notes": "Persists the page number DURING pagination, so a run interrupted before the detail phase still has somewhere to resume from."
+      "notes": "Terminating side branch. NEVER put this on the loop-back path: a Sheets node replaces the item json, so the next Fetch List Page would get no sb_url."
     },
     {
       "parameters": {
@@ -1260,6 +1260,11 @@
             "node": "Blocked?",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Page Checkpoint Due?",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -1286,7 +1291,7 @@
       "main": [
         [
           {
-            "node": "Page Checkpoint Due?",
+            "node": "Fetch List Page",
             "type": "main",
             "index": 0
           }
@@ -1308,13 +1313,6 @@
             "type": "main",
             "index": 0
           }
-        ],
-        [
-          {
-            "node": "Fetch List Page",
-            "type": "main",
-            "index": 0
-          }
         ]
       ]
     },
@@ -1323,17 +1321,6 @@
         [
           {
             "node": "Write Page Checkpoint",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Write Page Checkpoint": {
-      "main": [
-        [
-          {
-            "node": "Fetch List Page",
             "type": "main",
             "index": 0
           }

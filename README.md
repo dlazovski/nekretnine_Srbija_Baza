@@ -47,7 +47,7 @@ in the run's execution data). Prices additionally come from two *independent*
 sources, and a disagreement between them is reported rather than resolved
 silently.
 
-Verified by 197 assertions, including regression tests reproducing both live
+Verified by 199 assertions, including regression tests reproducing both live
 bugs from the payload shapes the probe reported. See
 [Development](#development).
 
@@ -184,21 +184,25 @@ The Step 0 probe checks all of them automatically.
 
 ## Scale: what a full category actually costs
 
-Measured from the probe: ~26 listings per results page, ~2 s per ScrapingBee
-request, and the `delay_seconds` pause applies to detail requests only.
-Apartments (34,128 listings) works out at ~1,313 results pages (~45 min), plus
-one detail request per listing above 100,000 EUR:
+Measured, not estimated: a partial run covered 24 results pages (~624 listings)
+and produced 419 rows, i.e. **~91% of apartment listings are above 100,000 EUR**
+— far more than a first guess would suggest, but unsurprising at current
+Belgrade and Novi Sad prices. Extrapolated to the full apartments category:
 
-| Share above 100k | Detail requests | Total requests | Detail phase |
-|---|---|---|---|
-| 20% | ~6,800 | ~8,100 | ~8.5 h |
-| 30% | ~10,200 | ~11,600 | ~13 h |
-| 40% | ~13,700 | ~15,000 | ~17 h |
+| | |
+|---|---|
+| Results pages | ~1,313 (~45 min) |
+| Detail requests | ~31,000 |
+| Detail phase at `delay_seconds: 2.5` | **~39 hours** |
+| Rows written | ~23,000 |
 
-That is one long n8n execution. **Run it in chunks**: set `max_pages` to 200
-(~7 chunks of roughly 2 h for apartments), and between chunks copy `Last Page`
-from the `Checkpoint` tab into `resume_from_page`. The other four categories are
-far smaller, and garages should yield ~0 rows.
+That is a day and a half of requests for apartments alone, so **chunking is not
+optional**. Set `max_pages: 200` (~7 chunks), and between chunks copy `Last Page`
+and `Last Listing ID` from the `Checkpoint` tab into `resume_from_page` and
+`resume_after_listing_id`. Dropping `delay_seconds` to 1 cuts it to ~26 hours at
+some extra risk of rate limiting.
+
+The other four categories are far smaller, and garages should yield ~0 rows.
 
 Two consequences of a multi-hour run worth knowing: listings shift between pages
 as new ones are posted, so a few may be missed or seen twice (duplicates are
@@ -267,7 +271,7 @@ tests/               unit tests, structural validation, workflow simulation
 
 ```bash
 python3 build/build.py   # regenerate both workflow JSON files
-npm test                 # 197 assertions across 4 suites
+npm test                 # 199 assertions across 4 suites
 ```
 
 `tests/simulate.js` is the important one: it pulls the JavaScript **out of the

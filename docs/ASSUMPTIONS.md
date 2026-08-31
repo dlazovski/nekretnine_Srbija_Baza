@@ -161,6 +161,23 @@ and so was invisible to the existing detector.
 normally, it is a soft block and `premium_proxy=true` / a longer
 `delay_seconds` / `render_js=true` recovers the data.
 
+**F9. Pagination died at page 25 of every run, silently capping output.** A full
+apartments run produced 419 rows — 2–8% of the catalogue — and stopped with
+`list_fetch_failed_page_25: URL parameter must be a string, got undefined`.
+`Write Page Checkpoint` (a Google Sheets node) sat on the pagination loop-back
+path. A Sheets node **replaces** the item json with the row it wrote, so the
+item arriving at `Fetch List Page` had no `sb_url`, and with
+`checkpoint_every_pages: 25` the very first checkpoint (25 % 25 == 0) killed the
+loop. The page checkpoint added to *improve* resumability is what capped the run.
+This is the same root cause as the Run Summary bug fixed one commit earlier —
+one instance was fixed and the identical pattern in the pagination loop missed.
+*Fix:* the checkpoint is now a **terminating side branch** off `Parse List Page`,
+never on the loop-back path. And `tests/validate.js` now walks back from every
+node whose URL reads `$json.<field>` and fails if any producer is a node type
+that replaces the item json, or a Code/Set node that never sets that field. The
+end-to-end simulator could not catch this because it drives the pagination loop
+itself rather than following the workflow's wiring.
+
 ### Why the probe reported "None — all Step 0 assumptions held"
 It checked whether a field was *found*, never whether the value was *right*.
 The report now also cross-checks results-page price against detail-page price

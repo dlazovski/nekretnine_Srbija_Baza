@@ -39,6 +39,51 @@ for (const f of ['workflows/4zida-serbia-scraper.json', 'workflows/4zida-step0-p
   const blob = JSON.stringify(wf);
   const re = /\$\('([^']+)'\)/g; let m;
   while ((m = re.exec(blob)) !== null) if (!names.has(m[1])) bad(f + ": expression references missing node $('" + m[1] + "')");
+  /* A node whose URL reads $json.<field> can only be fed by producers that
+   * actually emit that field. A Google Sheets node REPLACES the item json with
+   * the row it wrote, so putting one on a loop-back path silently strips the
+   * field and the next request gets `undefined`. That shipped twice: once into
+   * the Run Summary node, once into the pagination loop, where it capped every
+   * run at 24 pages. */
+  const PASSTHROUGH = new Set(['n8n-nodes-base.if', 'n8n-nodes-base.wait',
+    'n8n-nodes-base.splitInBatches', 'n8n-nodes-base.noOp', 'n8n-nodes-base.merge']);
+  const REPLACES_JSON = new Set(['n8n-nodes-base.googleSheets', 'n8n-nodes-base.httpRequest']);
+  const byName = Object.fromEntries(wf.nodes.map(n => [n.name, n]));
+  const feeders = (name) => Object.entries(wf.connections)
+    .filter(([, c]) => (c.main || []).some(outs => outs.some(t => t.node === name)))
+    .map(([src]) => src);
+
+  for (const n of wf.nodes) {
+    const url = n.parameters && n.parameters.url;
+    const m = typeof url === 'string' && url.match(/^=\{\{\s*\$json\.(\w+)\s*\}\}$/);
+    if (!m) continue;
+    const field = m[1];
+    const seen = new Set(), queue = feeders(n.name);
+    while (queue.length) {
+      const src = queue.shift();
+      if (seen.has(src)) continue;
+      seen.add(src);
+      const p = byName[src];
+      if (!p) continue;
+      if (PASSTHROUGH.has(p.type)) { queue.push(...feeders(src)); continue; }
+      if (REPLACES_JSON.has(p.type)) {
+        bad(f + ': ' + n.name + ' reads $json.' + field + ' but is fed by ' + src +
+            ' (' + p.type.split('.').pop() + '), which replaces the item json — the field will be undefined');
+        continue;
+      }
+      if (p.type === 'n8n-nodes-base.code') {
+        if (!p.parameters.jsCode.includes(field)) {
+          bad(f + ': ' + n.name + ' reads $json.' + field + ' but producer ' + src + ' never sets it');
+        }
+        continue;
+      }
+      if (p.type === 'n8n-nodes-base.set') {
+        const names = (p.parameters.assignments.assignments || []).map(a => a.name);
+        if (!names.includes(field)) bad(f + ': ' + n.name + ' reads $json.' + field + ' but Set node ' + src + ' does not define it');
+      }
+    }
+  }
+
   console.log('checked ' + f + ' (' + wf.nodes.length + ' nodes, ' + reached.size + ' reachable)');
 }
 console.log(fail ? '\n' + fail + ' structural problem(s)' : '\nstructure OK');
